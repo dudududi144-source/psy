@@ -1,0 +1,70 @@
+# ═══════════════════════════════════════════
+# Secrets & Environment (NEVER commit these)
+# ═══════════════════════════════════════════
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa
+id_ed25519
+credentials.json
+secrets.json
+.npmrc
+.pypirc
+.netrc
+
+# ═══════════════════════════════════════════
+# Dependencies
+# ═══════════════════════════════════════════
+node_modules/
+.pnp
+.pnp.js
+
+# ═══════════════════════════════════════════
+# Build outputs
+# ═══════════════════════════════════════════
+.next/
+out/
+dist/
+build/
+.vercel
+.turbo
+*.tsbuildinfo
+
+# ═══════════════════════════════════════════
+# Logs & Databases
+# ═══════════════════════════════════════════
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ═══════════════════════════════════════════
+# OS & IDE
+# ═══════════════════════════════════════════
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ═══════════════════════════════════════════
+# Testing & Coverage
+# ═══════════════════════════════════════════
+coverage/
+.nyc_output/
