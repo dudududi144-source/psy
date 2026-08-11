@@ -27,11 +27,10 @@ body{
 .subtitle{color:var(--dim);margin-top:6px;letter-spacing:.15em;text-transform:uppercase;font-size:12px}
 .badges{margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 .badge{font-size:11px;padding:4px 12px;border:1px solid var(--border);border-radius:999px;color:var(--dim)}
-.layout{max-width:1100px;margin:0 auto;padding:0 20px 40px;display:grid;grid-template-columns:1fr 340px;gap:20px}
-@media(max-width:900px){.layout{grid-template-columns:1fr}}
+.layout{max-width:860px;margin:0 auto;padding:0 20px 40px;display:flex;flex-direction:column;gap:20px}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:20px}
 .panel h2{font-size:15px;letter-spacing:.08em;margin-bottom:14px;color:var(--cyan);text-transform:uppercase}
-.transport-panel{grid-column:1/-1;display:flex;flex-direction:column;gap:14px;align-items:center}
+.transport-panel{display:flex;flex-direction:column;gap:14px;align-items:center}
 .play-btn{font-size:18px;padding:14px 44px;border-radius:999px;cursor:pointer;
   background:linear-gradient(90deg,var(--cyan),var(--purple));color:#0a0518;border:none;font-weight:700}
 .play-btn.playing{background:linear-gradient(90deg,var(--magenta),var(--purple))}
@@ -54,17 +53,6 @@ kbd{background:#0d0620;border:1px solid var(--border);border-radius:4px;padding:
 .preset-name{font-weight:700;color:var(--cyan)}
 .preset-tag{font-size:11px;color:var(--magenta);margin:4px 0}
 .preset-desc{font-size:12px;color:var(--dim)}
-.field{margin-bottom:14px}
-.field label{display:block;font-size:13px;color:var(--dim);margin-bottom:6px}
-.field input[type=range]{width:100%}
-.field textarea,.field input[type=text]{width:100%;background:#0d0620;border:1px solid var(--border);
-  border-radius:8px;padding:10px;color:var(--text);font-size:13px}
-.chips{display:flex;flex-wrap:wrap;gap:6px}
-.chip{font-size:12px;background:#0d0620;border:1px solid var(--border);border-radius:999px;padding:4px 10px;color:var(--dim)}
-.ab-choice{display:flex;gap:16px;font-size:14px;color:var(--text)}
-.consent{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--dim)}
-.submit-btn{width:100%;padding:12px;border-radius:10px;border:none;cursor:pointer;font-weight:700;
-  background:linear-gradient(90deg,var(--cyan),var(--purple));color:#0a0518}
 .footer{text-align:center;padding:24px;color:var(--dim);font-size:12px}
 .footer a{color:var(--purple);text-decoration:none}
 </style>
@@ -74,7 +62,7 @@ kbd{background:#0d0620;border:1px solid var(--border);border-radius:4px;padding:
   <div class="logo">PSY6</div>
   <div class="subtitle">experimental psytrance engine &middot; browser playground</div>
   <div class="badges">
-    <span class="badge">no install</span><span class="badge">no account</span><span class="badge">30s feedback</span>
+    <span class="badge">no install</span><span class="badge">no account</span>
   </div>
 </header>
 <main class="layout">
@@ -96,35 +84,6 @@ kbd{background:#0d0620;border:1px solid var(--border);border-radius:4px;padding:
   <section class="panel">
     <h2>Presets</h2>
     <div id="presetGrid" class="preset-grid"></div>
-  </section>
-  <section class="panel">
-    <h2>Feedback <span style="color:var(--dim);font-size:12px;text-transform:none">(30 seconds)</span></h2>
-    <form id="feedbackForm">
-      <div class="field"><label>Does it sound psytrance-y? <span id="genreFitVal">3</span>/5</label>
-        <input type="range" id="genreFit" min="1" max="5" value="3"></div>
-      <div class="field"><label>Sound quality <span id="soundQualityVal">3</span>/5</label>
-        <input type="range" id="soundQuality" min="1" max="5" value="3"></div>
-      <div class="field"><label>What is wrong? (optional)</label>
-        <div class="chips">
-          <label class="chip"><input type="checkbox" name="issue" value="harsh"> harsh</label>
-          <label class="chip"><input type="checkbox" name="issue" value="muddy"> muddy</label>
-          <label class="chip"><input type="checkbox" name="issue" value="clicks"> clicks</label>
-          <label class="chip"><input type="checkbox" name="issue" value="thin"> thin</label>
-          <label class="chip"><input type="checkbox" name="issue" value="generic"> generic</label>
-          <label class="chip"><input type="checkbox" name="issue" value="boring"> boring</label>
-        </div></div>
-      <div class="field"><label>Which variant is better?</label>
-        <div class="ab-choice">
-          <label><input type="radio" name="best" id="bestA" value="A"> A</label>
-          <label><input type="radio" name="best" id="bestB" value="B"> B</label>
-        </div></div>
-      <div class="field"><label>Comment</label>
-        <textarea id="comment" rows="3" placeholder="harsh highs? weak low end? not rolling enough?"></textarea></div>
-      <div class="field"><label>Alias (optional)</label>
-        <input type="text" id="alias" maxlength="40" placeholder="anonymous by default">
-        <label class="consent"><input type="checkbox" id="consent"> credit me with this alias</label></div>
-      <button type="submit" class="submit-btn">Send Feedback &#9656;</button>
-    </form>
   </section>
 </main>
 <footer class="footer mono">
@@ -448,38 +407,10 @@ window.addEventListener("keydown",function(e){
     trackEvent("note_triggered",{key:k});
   }else if(k===" "){ e.preventDefault(); togglePlay(); }
 });
-function submitFeedback(ev){
-  ev.preventDefault();
-  var issues=[];
-  document.querySelectorAll('input[name="issue"]:checked').forEach(function(c){ issues.push(c.value); });
-  var payload={
-    preset_id:selectedPresetId, variant:variant,
-    genre_fit:Number($("genreFit").value), sound_quality:Number($("soundQuality").value),
-    issues:issues,
-    best_variant:$("bestA").checked?"A":($("bestB").checked?"B":null),
-    comment:($("comment").value||"").trim().slice(0,600),
-    alias:$("consent").checked?($("alias").value||"").trim().slice(0,40):null,
-    consent_to_credit:$("consent").checked
-  };
-  trackEvent("feedback_submit",{preset:payload.preset_id});
-  fetch("/feedback",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
-    .then(function(res){ if(!res.ok) throw new Error("http "+res.status);
-      setStatus("Feedback sent. Thank you!","ok"); $("feedbackForm").reset(); })
-    .catch(function(){
-      try{
-        var arr=JSON.parse(localStorage.getItem("psy6_feedback")||"[]");
-        arr.push(payload); localStorage.setItem("psy6_feedback",JSON.stringify(arr));
-      }catch(e){}
-      setStatus("Saved locally (offline mode).","warn");
-    });
-}
 function init(){
   $("playBtn").addEventListener("click",togglePlay);
   $("variantA").addEventListener("click",function(){ setVariantUi("A"); });
   $("variantB").addEventListener("click",function(){ setVariantUi("B"); });
-  $("feedbackForm").addEventListener("submit",submitFeedback);
-  $("genreFit").addEventListener("input",function(){ $("genreFitVal").textContent=this.value; });
-  $("soundQuality").addEventListener("input",function(){ $("soundQualityVal").textContent=this.value; });
   renderPresetCards();
   selectPreset(presets[0].id);
   drawViz();
