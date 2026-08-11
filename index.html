@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PSY6 — Psytrance Playground</title>
+<style>
+:root{
+  --bg:#070312; --panel:rgba(20,10,40,.72); --border:rgba(150,90,255,.25);
+  --cyan:#00ffc8; --purple:#b967ff; --magenta:#ff2e88; --text:#efe9fb;
+  --dim:#9d8fc0; --ok:#3dffa8; --warn:#ffb347; --err:#ff4d6d;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--text); min-height:100vh;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background-image:
+    radial-gradient(1200px 600px at 80% -10%, rgba(120,40,200,.22), transparent 60%),
+    radial-gradient(900px 500px at 10% 110%, rgba(0,255,200,.08), transparent 60%);
+}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.topbar{text-align:center;padding:44px 20px 26px}
+.logo{font-size:60px;font-weight:900;letter-spacing:.1em;
+  background:linear-gradient(90deg,var(--cyan),var(--purple),var(--magenta));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 20px rgba(185,103,255,.5))}
+.subtitle{color:var(--dim);margin-top:6px;letter-spacing:.15em;text-transform:uppercase;font-size:12px}
+.badges{margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.badge{font-size:11px;padding:4px 12px;border:1px solid var(--border);border-radius:999px;color:var(--dim)}
+.layout{max-width:1100px;margin:0 auto;padding:0 20px 40px;display:grid;grid-template-columns:1fr 340px;gap:20px}
+@media(max-width:900px){.layout{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:20px}
+.panel h2{font-size:15px;letter-spacing:.08em;margin-bottom:14px;color:var(--cyan);text-transform:uppercase}
+.transport-panel{grid-column:1/-1;display:flex;flex-direction:column;gap:14px;align-items:center}
+.play-btn{font-size:18px;padding:14px 44px;border-radius:999px;cursor:pointer;
+  background:linear-gradient(90deg,var(--cyan),var(--purple));color:#0a0518;border:none;font-weight:700}
+.play-btn.playing{background:linear-gradient(90deg,var(--magenta),var(--purple))}
+.now-playing{color:var(--dim);font-size:13px}
+.variant-toggle{display:flex;gap:8px}
+.variant-btn{padding:8px 26px;border-radius:10px;background:transparent;border:1px solid var(--border);
+  color:var(--dim);cursor:pointer;font-weight:700}
+.variant-btn.active{background:var(--purple);color:#0a0518}
+#viz{width:100%;max-width:620px;height:120px;border-radius:12px;border:1px solid var(--border);background:#070312}
+.diag{font-size:12px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+.diag .ok{color:var(--ok)} .diag .err{color:var(--err)} .diag .dim{color:var(--dim)}
+.status{min-height:20px;font-size:13px}
+.status.ok{color:var(--ok)} .status.warn{color:var(--warn)} .status.error{color:var(--err)}
+.hint{color:var(--dim);font-size:12px}
+kbd{background:#0d0620;border:1px solid var(--border);border-radius:4px;padding:1px 6px;color:var(--cyan);font-size:11px}
+.preset-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.preset-card{text-align:left;padding:16px;border-radius:12px;cursor:pointer;background:#0d0620;
+  border:1px solid var(--border);color:var(--text);font:inherit}
+.preset-card.active{border-color:var(--cyan)}
+.preset-name{font-weight:700;color:var(--cyan)}
+.preset-tag{font-size:11px;color:var(--magenta);margin:4px 0}
+.preset-desc{font-size:12px;color:var(--dim)}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:13px;color:var(--dim);margin-bottom:6px}
+.field input[type=range]{width:100%}
+.field textarea,.field input[type=text]{width:100%;background:#0d0620;border:1px solid var(--border);
+  border-radius:8px;padding:10px;color:var(--text);font-size:13px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;background:#0d0620;border:1px solid var(--border);border-radius:999px;padding:4px 10px;color:var(--dim)}
+.ab-choice{display:flex;gap:16px;font-size:14px;color:var(--text)}
+.consent{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--dim)}
+.submit-btn{width:100%;padding:12px;border-radius:10px;border:none;cursor:pointer;font-weight:700;
+  background:linear-gradient(90deg,var(--cyan),var(--purple));color:#0a0518}
+.footer{text-align:center;padding:24px;color:var(--dim);font-size:12px}
+.footer a{color:var(--purple);text-decoration:none}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">PSY6</div>
+  <div class="subtitle">experimental psytrance engine &middot; browser playground</div>
+  <div class="badges">
+    <span class="badge">no install</span><span class="badge">no account</span><span class="badge">30s feedback</span>
+  </div>
+</header>
+<main class="layout">
+  <section class="panel transport-panel">
+    <button id="playBtn" class="play-btn">&#9654; Play</button>
+    <div class="now-playing mono" id="nowPlaying">loading&hellip;</div>
+    <div class="variant-toggle">
+      <button id="variantA" class="variant-btn active">A</button>
+      <button id="variantB" class="variant-btn">B</button>
+    </div>
+    <canvas id="viz" width="620" height="120"></canvas>
+    <div class="diag mono">
+      <span>audio: <span id="audioState" class="dim">idle</span></span>
+      <span>self-test: <span id="selfTest" class="dim">running&hellip;</span></span>
+    </div>
+    <div class="hint"><kbd>Space</kbd> play/stop &nbsp;&middot;&nbsp; keys <kbd>A W S E D F T G Y H U J K</kbd> play lead notes</div>
+    <div id="status" class="status mono"></div>
+  </section>
+  <section class="panel">
+    <h2>Presets</h2>
+    <div id="presetGrid" class="preset-grid"></div>
+  </section>
+  <section class="panel">
+    <h2>Feedback <span style="color:var(--dim);font-size:12px;text-transform:none">(30 seconds)</span></h2>
+    <form id="feedbackForm">
+      <div class="field"><label>Does it sound psytrance-y? <span id="genreFitVal">3</span>/5</label>
+        <input type="range" id="genreFit" min="1" max="5" value="3"></div>
+      <div class="field"><label>Sound quality <span id="soundQualityVal">3</span>/5</label>
+        <input type="range" id="soundQuality" min="1" max="5" value="3"></div>
+      <div class="field"><label>What is wrong? (optional)</label>
+        <div class="chips">
+          <label class="chip"><input type="checkbox" name="issue" value="harsh"> harsh</label>
+          <label class="chip"><input type="checkbox" name="issue" value="muddy"> muddy</label>
+          <label class="chip"><input type="checkbox" name="issue" value="clicks"> clicks</label>
+          <label class="chip"><input type="checkbox" name="issue" value="thin"> thin</label>
+          <label class="chip"><input type="checkbox" name="issue" value="generic"> generic</label>
+          <label class="chip"><input type="checkbox" name="issue" value="boring"> boring</label>
+        </div></div>
+      <div class="field"><label>Which variant is better?</label>
+        <div class="ab-choice">
+          <label><input type="radio" name="best" id="bestA" value="A"> A</label>
+          <label><input type="radio" name="best" id="bestB" value="B"> B</label>
+        </div></div>
+      <div class="field"><label>Comment</label>
+        <textarea id="comment" rows="3" placeholder="harsh highs? weak low end? not rolling enough?"></textarea></div>
+      <div class="field"><label>Alias (optional)</label>
+        <input type="text" id="alias" maxlength="40" placeholder="anonymous by default">
+        <label class="consent"><input type="checkbox" id="consent"> credit me with this alias</label></div>
+      <button type="submit" class="submit-btn">Send Feedback &#9656;</button>
+    </form>
+  </section>
+</main>
+<footer class="footer mono">
+  <a href="https://github.com/dudududi144-source/psy" target="_blank" rel="noopener">source</a>
+  &middot; PSY6 &middot; single-file build &mdash; no fetch, no modules, no external js
+</footer>
+<script>
+"use strict";
+var PSY6_PRESETS = [
+  { id:"rolling_bass_01", name:"Rolling Bass", tag:"classic full-on", bpm:145, root:33,
+    desc:"16th-note rolling bass under a four-on-the-floor kick.",
+    patterns:{ kick:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+               bass:[null,0,0,0,null,0,0,0,null,0,0,0,null,0,0,3],
+               lead:[null,null,null,null,null,null,12,null,null,null,null,null,15,null,12,null],
+               hat:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,1] },
+    variants:{ A:{bassWave:"sawtooth",bassCut:700,bassQ:6,leadWave:"sawtooth",leadCut:1800,leadQ:9,hatLvl:0.12,leadLvl:0.45},
+               B:{bassWave:"square",bassCut:1150,bassQ:11,leadWave:"sawtooth",leadCut:2600,leadQ:14,hatLvl:0.18,leadLvl:0.55} } },
+  { id:"acid_lead_03", name:"Acid Lead", tag:"squelchy 303-ish", bpm:148, root:33,
+    desc:"Resonant acid line over a tight groove. Variant B pushes the filter.",
+    patterns:{ kick:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+               bass:[null,0,null,0,null,0,null,0,null,0,null,0,null,0,5,7],
+               lead:[0,null,3,null,0,null,7,null,10,null,7,null,3,null,2,null],
+               hat:[0,0,1,0,0,0,1,0,0,0,1,0,0,1,1,0] },
+    variants:{ A:{bassWave:"sawtooth",bassCut:600,bassQ:5,leadWave:"sawtooth",leadCut:2200,leadQ:12,hatLvl:0.12,leadLvl:0.55},
+               B:{bassWave:"sawtooth",bassCut:800,bassQ:8,leadWave:"square",leadCut:3400,leadQ:18,hatLvl:0.16,leadLvl:0.62} } },
+  { id:"dark_prog_02", name:"Dark Prog", tag:"hypnotic 138", bpm:138, root:31,
+    desc:"Darker, slower, hypnotic. Sparse eerie highs.",
+    patterns:{ kick:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+               bass:[null,0,0,0,null,0,0,0,null,0,0,0,null,0,3,0],
+               lead:[null,null,null,12,null,null,null,null,null,null,null,14,null,null,null,null],
+               hat:[0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0] },
+    variants:{ A:{bassWave:"sawtooth",bassCut:480,bassQ:4,leadWave:"triangle",leadCut:1400,leadQ:6,hatLvl:0.07,leadLvl:0.40},
+               B:{bassWave:"sawtooth",bassCut:650,bassQ:7,leadWave:"sawtooth",leadCut:1900,leadQ:10,hatLvl:0.11,leadLvl:0.48} } },
+  { id:"full_on_04", name:"Full On", tag:"peak-time 150", bpm:150, root:35,
+    desc:"Busy peak-time energy: rolling bass, active lead, extra hats.",
+    patterns:{ kick:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+               bass:[null,0,0,0,null,0,0,0,null,0,0,0,null,0,7,10],
+               lead:[0,null,null,3,null,null,7,null,10,null,null,7,12,null,7,null],
+               hat:[0,0,1,0,0,1,1,0,0,0,1,0,0,1,1,1] },
+    variants:{ A:{bassWave:"sawtooth",bassCut:900,bassQ:7,leadWave:"sawtooth",leadCut:2400,leadQ:10,hatLvl:0.16,leadLvl:0.50},
+               B:{bassWave:"square",bassCut:1300,bassQ:12,leadWave:"square",leadCut:3200,leadQ:16,hatLvl:0.22,leadLvl:0.60} } }
+];
+function mtof(midi){ return 440*Math.pow(2,(midi-69)/12); }
+var VALID_OSC={sine:1,square:1,sawtooth:1,triangle:1};
+function oscType(n){ return VALID_OSC[n]?n:"sawtooth"; }
+function makeNoiseBuffer(ctx){
+  var len=Math.floor(ctx.sampleRate*0.25);
+  var buf=ctx.createBuffer(1,len,ctx.sampleRate);
+  var d=buf.getChannelData(0);
+  var seed=1337;
+  for(var i=0;i<len;i++){ seed=(seed*16807)%2147483647; d[i]=(seed/2147483647)*2-1; }
+  return buf;
+}
+function makeVoices(ctx, dest, delaySend, noiseBuf){
+  function kick(t){
+    var osc=ctx.createOscillator(), gain=ctx.createGain();
+    osc.type="sine";
+    osc.frequency.setValueAtTime(150,t);
+    osc.frequency.exponentialRampToValueAtTime(44,t+0.09);
+    gain.gain.setValueAtTime(1.0,t);
+    gain.gain.exponentialRampToValueAtTime(0.001,t+0.3);
+    osc.connect(gain); gain.connect(dest);
+    osc.start(t); osc.stop(t+0.32);
+  }
+  function hat(t,lvl){
+    var src=ctx.createBufferSource(); src.buffer=noiseBuf;
+    var hp=ctx.createBiquadFilter(); hp.type="highpass"; hp.frequency.value=7000;
+    var gain=ctx.createGain();
+    gain.gain.setValueAtTime(Math.max(0.001,lvl),t);
+    gain.gain.exponentialRampToValueAtTime(0.001,t+0.05);
+    src.connect(hp); hp.connect(gain); gain.connect(dest);
+    src.start(t); src.stop(t+0.06);
+  }
+  function bass(t,freq,v){
+    var osc=ctx.createOscillator(); osc.type=oscType(v.bassWave); osc.frequency.value=freq;
+    var filter=ctx.createBiquadFilter(); filter.type="lowpass"; filter.Q.value=v.bassQ;
+    var fStart=Math.max(60,v.bassCut), fEnd=Math.max(80,v.bassCut*0.35);
+    filter.frequency.setValueAtTime(fStart,t);
+    filter.frequency.exponentialRampToValueAtTime(fEnd,t+0.16);
+    var gain=ctx.createGain();
+    gain.gain.setValueAtTime(0.0001,t);
+    gain.gain.exponentialRampToValueAtTime(0.85,t+0.006);
+    gain.gain.exponentialRampToValueAtTime(0.001,t+0.2);
+    osc.connect(filter); filter.connect(gain); gain.connect(dest);
+    if(delaySend){ var send=ctx.createGain(); send.gain.value=0.12; gain.connect(send); send.connect(delaySend); }
+    osc.start(t); osc.stop(t+0.22);
+  }
+  function lead(t,freq,v,accent){
+    var peakCut=Math.max(200,v.leadCut*(accent?1.25:1));
+    var o1=ctx.createOscillator(), o2=ctx.createOscillator();
+    o1.type=oscType(v.leadWave); o2.type=oscType(v.leadWave);
+    o1.frequency.value=freq; o2.frequency.value=freq*Math.pow(2,9/1200);
+    var filter=ctx.createBiquadFilter(); filter.type="lowpass"; filter.Q.value=v.leadQ;
+    filter.frequency.setValueAtTime(180,t);
+    filter.frequency.exponentialRampToValueAtTime(peakCut,t+0.02);
+    filter.frequency.exponentialRampToValueAtTime(240,t+0.22);
+    var gain=ctx.createGain();
+    var peak=Math.max(0.05,v.leadLvl*(accent?1:0.7));
+    gain.gain.setValueAtTime(0.0001,t);
+    gain.gain.exponentialRampToValueAtTime(peak,t+0.008);
+    gain.gain.exponentialRampToValueAtTime(0.001,t+0.24);
+    o1.connect(filter); o2.connect(filter); filter.connect(gain); gain.connect(dest);
+    if(delaySend){ var send=ctx.createGain(); send.gain.value=0.3; gain.connect(send); send.connect(delaySend); }
+    o1.start(t); o2.start(t); o1.stop(t+0.26); o2.stop(t+0.26);
+  }
+  return { kick:kick, hat:hat, bass:bass, lead:lead };
+}
+function Psy6Engine(){
+  this.ctx=null; this.master=null; this.analyser=null; this.delaySend=null; this.delay=null;
+  this.voices=null; this.preset=null; this.variant="A";
+  this.isPlaying=false; this.currentStep=0; this.nextNoteTime=0; this.timerId=null;
+  this.lookahead=25; this.scheduleAheadTime=0.15; this.totalSteps=64;
+  this._timeBuf=new Uint8Array(512);
+}
+Psy6Engine.prototype.init=function(){
+  if(this.ctx){ if(this.ctx.state==="suspended"){ return this.ctx.resume(); } return Promise.resolve(); }
+  var AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC) return Promise.reject(new Error("Web Audio API not supported"));
+  this.ctx=new AC();
+  this.master=this.ctx.createGain(); this.master.gain.value=0.9;
+  this.analyser=this.ctx.createAnalyser(); this.analyser.fftSize=512; this.analyser.smoothingTimeConstant=0.7;
+  this.master.connect(this.analyser); this.analyser.connect(this.ctx.destination);
+  this.delaySend=this.ctx.createGain(); this.delaySend.gain.value=1.0;
+  this.delay=this.ctx.createDelay(2.0); this.delay.delayTime.value=0.3;
+  var wet=this.ctx.createGain(); wet.gain.value=0.22;
+  var fb=this.ctx.createGain(); fb.gain.value=0.34;
+  this.delaySend.connect(this.delay); this.delay.connect(wet); wet.connect(this.master);
+  this.delay.connect(fb); fb.connect(this.delay);
+  var noise=makeNoiseBuffer(this.ctx);
+  this.voices=makeVoices(this.ctx,this.master,this.delaySend,noise);
+  if(this.ctx.state==="suspended") return this.ctx.resume();
+  return Promise.resolve();
+};
+Psy6Engine.prototype.setPreset=function(p){ this.preset=p; };
+Psy6Engine.prototype.setVariant=function(v){ this.variant=v; };
+Psy6Engine.prototype.stepDur=function(){ return 60/this.preset.bpm/4; };
+Psy6Engine.prototype.updateDelayTime=function(){
+  if(this.delay&&this.preset) this.delay.delayTime.value=this.stepDur()*3;
+};
+Psy6Engine.prototype.play=function(){
+  var self=this;
+  return this.init().then(function(){
+    if(self.isPlaying) return;
+    if(!self.preset) throw new Error("no preset loaded");
+    self.isPlaying=true; self.currentStep=0;
+    self.nextNoteTime=self.ctx.currentTime+0.06;
+    self.updateDelayTime();
+    self.timerId=setInterval(function(){ self.scheduler(); }, self.lookahead);
+  });
+};
+Psy6Engine.prototype.stop=function(){
+  this.isPlaying=false;
+  if(this.timerId){ clearInterval(this.timerId); this.timerId=null; }
+};
+Psy6Engine.prototype.scheduler=function(){
+  try{
+    while(this.nextNoteTime < this.ctx.currentTime+this.scheduleAheadTime){
+      this.scheduleStep(this.currentStep,this.nextNoteTime);
+      this.nextNoteTime+=this.stepDur();
+      this.currentStep=(this.currentStep+1)%this.totalSteps;
+    }
+  }catch(e){}
+};
+Psy6Engine.prototype.scheduleStep=function(step,time){
+  if(!this.preset||!this.voices) return;
+  var v=this.preset.variants[this.variant]; if(!v) return;
+  var pat=this.preset.patterns; if(!pat) return;
+  var s16=step%16;
+  if(pat.kick&&pat.kick[s16]) this.voices.kick(time);
+  if(pat.hat&&pat.hat[s16]) this.voices.hat(time,v.hatLvl||0.1);
+  var bn=pat.bass?pat.bass[s16]:null;
+  if(bn!==null&&bn!==undefined) this.voices.bass(time,mtof(this.preset.root+bn),v);
+  var ln=pat.lead?pat.lead[s16]:null;
+  if(ln!==null&&ln!==undefined) this.voices.lead(time,mtof(this.preset.root+24+ln),v,s16%4===0);
+};
+Psy6Engine.prototype.triggerNote=function(midiNote){
+  var self=this;
+  return this.init().then(function(){
+    if(!self.preset||!self.voices) return;
+    var v=self.preset.variants[self.variant];
+    self.voices.lead(self.ctx.currentTime+0.01,mtof(midiNote),v,true);
+  }).catch(function(){ });
+};
+Psy6Engine.prototype.getEnergy=function(){
+  if(!this.analyser) return 0;
+  this.analyser.getByteTimeDomainData(this._timeBuf);
+  var sum=0;
+  for(var i=0;i<this._timeBuf.length;i++){ var x=(this._timeBuf[i]-128)/128; sum+=x*x; }
+  return Math.sqrt(sum/this._timeBuf.length);
+};
+function runSelfTest(){
+  var OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+  if(!OAC) return Promise.resolve({ok:false,reason:"no OfflineAudioContext"});
+  var preset=PSY6_PRESETS[0], v=preset.variants.A;
+  var sr=44100, stepDur=60/preset.bpm/4, durSec=stepDur*16+0.5;
+  var octx;
+  try{ octx=new OAC(2,Math.ceil(sr*durSec),sr); }
+  catch(e){ return Promise.resolve({ok:false,reason:"OAC ctor: "+e.message}); }
+  var master=octx.createGain(); master.gain.value=0.9; master.connect(octx.destination);
+  var voices=makeVoices(octx,master,null,makeNoiseBuffer(octx));
+  for(var s=0;s<16;s++){
+    var t=0.05+s*stepDur;
+    if(preset.patterns.kick[s]) voices.kick(t);
+    if(preset.patterns.hat[s]) voices.hat(t,v.hatLvl);
+    var bn=preset.patterns.bass[s];
+    if(bn!==null&&bn!==undefined) voices.bass(t,mtof(preset.root+bn),v);
+    var ln=preset.patterns.lead[s];
+    if(ln!==null&&ln!==undefined) voices.lead(t,mtof(preset.root+24+ln),v,s%4===0);
+  }
+  return octx.startRendering().then(function(rendered){
+    var ch=rendered.getChannelData(0), peak=0, sumSq=0;
+    for(var i=0;i<ch.length;i++){ var a=Math.abs(ch[i]); if(a>peak)peak=a; sumSq+=ch[i]*ch[i]; }
+    var rms=Math.sqrt(sumSq/ch.length);
+    return { ok:(rms>0.01&&peak>0.1), rms:+rms.toFixed(4), peak:+peak.toFixed(3) };
+  }).catch(function(e){ return {ok:false,reason:"render: "+e.message}; });
+}
+var engine=new Psy6Engine();
+var presets=PSY6_PRESETS;
+var selectedPresetId=presets[0].id;
+var variant="A";
+function $(id){ return document.getElementById(id); }
+var statusTimer=null;
+function setStatus(msg,kind){
+  var s=$("status"); s.textContent=msg; s.className="status mono "+(kind||"");
+  if(statusTimer)clearTimeout(statusTimer);
+  statusTimer=setTimeout(function(){ s.textContent=""; },6000);
+}
+function setAudioState(txt,cls){ var a=$("audioState"); a.textContent=txt; a.className=cls||"dim"; }
+function trackEvent(name,detail){
+  try{
+    var arr=JSON.parse(localStorage.getItem("psy6_events")||"[]");
+    arr.push({name:name,detail:detail||{},ts:Date.now()});
+    localStorage.setItem("psy6_events",JSON.stringify(arr.slice(-200)));
+  }catch(e){}
+}
+function currentPreset(){
+  for(var i=0;i<presets.length;i++) if(presets[i].id===selectedPresetId) return presets[i];
+  return presets[0];
+}
+function renderPresetCards(){
+  var grid=$("presetGrid"); grid.innerHTML="";
+  presets.forEach(function(p){
+    var card=document.createElement("button");
+    card.className="preset-card"+(p.id===selectedPresetId?" active":"");
+    card.innerHTML='<div class="preset-name">'+p.name+'</div>'+
+      '<div class="preset-tag mono">'+p.tag+' &middot; '+p.bpm+' BPM</div>'+
+      '<div class="preset-desc">'+p.desc+'</div>';
+    card.addEventListener("click",function(){ selectPreset(p.id); });
+    grid.appendChild(card);
+  });
+}
+function selectPreset(id){
+  selectedPresetId=id;
+  var p=currentPreset();
+  engine.setPreset(p); engine.setVariant(variant);
+  renderPresetCards();
+  $("nowPlaying").textContent=p.name+" \u2014 variant "+variant+" \u00b7 "+p.bpm+" BPM";
+  trackEvent("preset_loaded",{preset:id,variant:variant});
+}
+function setVariantUi(v){
+  variant=v; engine.setVariant(v);
+  $("variantA").className="variant-btn"+(v==="A"?" active":"");
+  $("variantB").className="variant-btn"+(v==="B"?" active":"");
+  var p=currentPreset();
+  $("nowPlaying").textContent=p.name+" \u2014 variant "+v+" \u00b7 "+p.bpm+" BPM";
+  trackEvent("ab_variant_shown",{preset:selectedPresetId,variant:v});
+}
+function togglePlay(){
+  var btn=$("playBtn");
+  if(engine.isPlaying){
+    engine.stop();
+    btn.innerHTML="&#9654; Play"; btn.className="play-btn";
+    setAudioState("stopped","dim");
+    trackEvent("preset_stopped",{preset:selectedPresetId});
+    return;
+  }
+  engine.play().then(function(){
+    btn.innerHTML="&#9632; Stop"; btn.className="play-btn playing";
+    setAudioState(engine.ctx.state,"ok");
+    trackEvent("preset_played",{preset:selectedPresetId,variant:variant});
+    setTimeout(function(){
+      if(!engine.isPlaying) return;
+      var e=engine.getEnergy();
+      if(e<0.001){
+        setStatus("Diagnostics: sequencer running but analyser silent (energy="+e.toFixed(4)+
+          ", ctx="+engine.ctx.state+"). Check the self-test result above.","error");
+      }else{
+        setStatus("audio OK \u2014 live rms "+e.toFixed(3),"ok");
+      }
+    },800);
+  }).catch(function(err){
+    setStatus("Play failed: "+(err&&err.message?err.message:err),"error");
+    setAudioState("error","err");
+  });
+}
+var vizBuf=new Uint8Array(256);
+function drawViz(){
+  requestAnimationFrame(drawViz);
+  var canvas=$("viz"); if(!canvas) return;
+  var g=canvas.getContext("2d"), W=canvas.width, H=canvas.height;
+  g.fillStyle="#070312"; g.fillRect(0,0,W,H);
+  if(!engine.analyser) return;
+  engine.analyser.getByteFrequencyData(vizBuf);
+  var bars=64, barW=W/bars;
+  for(var i=0;i<bars;i++){
+    var val=vizBuf[Math.floor((i/bars)*vizBuf.length*0.7)]/255;
+    var h=val*H*0.9, hue=280-val*120;
+    g.fillStyle="hsl("+hue+",100%,"+(40+val*30)+"%)";
+    g.fillRect(i*barW+1,H-h,barW-2,h);
+  }
+}
+var KEYMAP={a:0,w:1,s:2,e:3,d:4,f:5,t:6,g:7,y:8,h:9,u:10,j:11,k:12};
+window.addEventListener("keydown",function(e){
+  if(e.repeat) return;
+  var tgt=e.target;
+  if(tgt&&(tgt.tagName==="INPUT"||tgt.tagName==="TEXTAREA")) return;
+  var k=(e.key||"").toLowerCase();
+  if(k in KEYMAP){
+    var p=currentPreset();
+    engine.triggerNote(p.root+24+KEYMAP[k]);
+    trackEvent("note_triggered",{key:k});
+  }else if(k===" "){ e.preventDefault(); togglePlay(); }
+});
+function submitFeedback(ev){
+  ev.preventDefault();
+  var issues=[];
+  document.querySelectorAll('input[name="issue"]:checked').forEach(function(c){ issues.push(c.value); });
+  var payload={
+    preset_id:selectedPresetId, variant:variant,
+    genre_fit:Number($("genreFit").value), sound_quality:Number($("soundQuality").value),
+    issues:issues,
+    best_variant:$("bestA").checked?"A":($("bestB").checked?"B":null),
+    comment:($("comment").value||"").trim().slice(0,600),
+    alias:$("consent").checked?($("alias").value||"").trim().slice(0,40):null,
+    consent_to_credit:$("consent").checked
+  };
+  trackEvent("feedback_submit",{preset:payload.preset_id});
+  fetch("/feedback",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+    .then(function(res){ if(!res.ok) throw new Error("http "+res.status);
+      setStatus("Feedback sent. Thank you!","ok"); $("feedbackForm").reset(); })
+    .catch(function(){
+      try{
+        var arr=JSON.parse(localStorage.getItem("psy6_feedback")||"[]");
+        arr.push(payload); localStorage.setItem("psy6_feedback",JSON.stringify(arr));
+      }catch(e){}
+      setStatus("Saved locally (offline mode).","warn");
+    });
+}
+function init(){
+  $("playBtn").addEventListener("click",togglePlay);
+  $("variantA").addEventListener("click",function(){ setVariantUi("A"); });
+  $("variantB").addEventListener("click",function(){ setVariantUi("B"); });
+  $("feedbackForm").addEventListener("submit",submitFeedback);
+  $("genreFit").addEventListener("input",function(){ $("genreFitVal").textContent=this.value; });
+  $("soundQuality").addEventListener("input",function(){ $("soundQualityVal").textContent=this.value; });
+  renderPresetCards();
+  selectPreset(presets[0].id);
+  drawViz();
+  runSelfTest().then(function(r){
+    var el=$("selfTest");
+    if(r.ok){ el.textContent="OK (rms "+r.rms+", peak "+r.peak+")"; el.className="ok"; }
+    else{ el.textContent="FAIL: "+(r.reason||"silent render"); el.className="err"; }
+  });
+  window.__psy6={
+    engine:engine,
+    presets:presets,
+    report:function(){
+      return { ctxState:engine.ctx?engine.ctx.state:"no-ctx", isPlaying:engine.isPlaying,
+               energy:+engine.getEnergy().toFixed(4), step:engine.currentStep,
+               preset:selectedPresetId, variant:variant };
+    },
+    selfTest:runSelfTest
+  };
+}
+if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",init);
+else init();
+</script>
+</body>
+</html>
