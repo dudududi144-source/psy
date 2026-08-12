@@ -211,5 +211,5 @@ Not built in P1.
 - [x] PSY6_ARCHITECTURE.md committed (this file)
 - [x] M2 tests green (22/22, run 31565505860)
 - [x] merge decision: MERGED (main = 5cb45e2d, tag v4.0-m2-song)
-- [ ] canonical pattern migration (section 7) — FIRST code step of P1
+- [x] canonical pattern migration (section 7) — DONE (commit 4205c5b2, ARP in Song model, makePatterns retired, 59/59 green)
 - [ ] then: deterministic estimator + tests A-J (section 6) — before any worklet/radio code
