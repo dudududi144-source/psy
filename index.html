@@ -53,6 +53,12 @@ body{
 .util-btn:hover{color:var(--cyan);border-color:var(--cyan)}
 .diag{font-size:11px;display:flex;flex-direction:column;justify-content:center;gap:4px;color:var(--dim)}
 .diag .ok{color:var(--ok)} .diag .err{color:var(--err)}
+.timeline{display:flex;gap:2px;flex-wrap:wrap;justify-content:center;max-width:640px;margin-top:2px}
+.tl-sec{height:18px;font-size:9px;line-height:18px;text-align:center;color:#0a0518;cursor:pointer;
+  border-radius:3px;background:var(--purple);overflow:hidden;padding:0 3px;font-weight:700;
+  font-family:ui-monospace,Menlo,monospace}
+.tl-sec:hover{background:var(--magenta)}
+.tl-sec.cur{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
 .knobs-row{display:flex;gap:18px;flex-wrap:wrap;justify-content:center}
 .knob{display:flex;flex-direction:column;align-items:center;gap:5px;user-select:none;touch-action:none}
 .knob-dial{position:relative;width:56px;height:56px;border-radius:50%;cursor:ns-resize;
@@ -114,7 +120,7 @@ body{
     <div id="knobs" class="knobs-row"></div>
   </section>
   <section class="panel">
-    <h2>Step Sequencer <span class="small">(click steps to edit &mdash; live) &middot; M = mute</span></h2>
+    <h2>Arp Pattern <span class="small">(click steps to edit &mdash; live)</span></h2>
     <div id="seq"></div>
   </section>
   <section class="panel">
@@ -122,6 +128,7 @@ body{
     <div id="pads" class="pads-row"></div>
     <canvas id="viz" width="860" height="90"></canvas>
     <div id="status" class="status mono"></div>
+    <div id="timeline" class="timeline"></div>
     <div class="hint">Keys <b>A W S E D F T G</b> play pads &middot; <b>Space</b> play/stop &middot; drag knobs vertically &middot; double-click knob = reset</div>
   </section>
 </main>
@@ -1361,10 +1368,32 @@ window.addEventListener("keydown",function(e){
   if(k in KEYMAP){ hitPad(KEYMAP[k],null); }
   else if(k===" "){ if(e.preventDefault)e.preventDefault(); togglePlay(); }
 });
+function renderTimelineFor(dev){
+  var el=$("timeline"); if(!el||!dev.song) return;
+  el.innerHTML="";
+  var song=dev.song;
+  for(var i=0;i<song.sections.length;i++){
+    (function(idx){
+      var sec=song.sections[idx];
+      var d=document.createElement("div");
+      d.className="tl-sec";
+      d.style.width=Math.max(24,sec.bars*2.4)+"px";
+      d.textContent=sec.name.slice(0,2);
+      d.title=sec.name+" ("+sec.bars+" bars, theme "+sec.themeKey+")";
+      d.addEventListener("click",function(){ dev.seekToBar(song.sectionStarts[idx]); });
+      el.appendChild(d);
+    })(i);
+  }
+}
+function updateTimelineUi(idx){
+  var el=$("timeline"); if(!el) return;
+  for(var i=0;i<el.children.length;i++) el.children[i].className="tl-sec"+(i===idx?" cur":"");
+}
 function initUi(){
   buildKnobs();
   buildSeq();
   buildPads();
+  renderTimelineFor(device);
   var ls=$("lcdSteps");
   if(ls){ ls.innerHTML=""; for(var i=0;i<16;i++){ var sp=document.createElement("span"); sp.className="ls"; ls.appendChild(sp); } }
   var pb=$("playBtn"); if(pb) pb.addEventListener("click",togglePlay);
@@ -1379,6 +1408,7 @@ function initUi(){
     else{ el.textContent="FAIL: "+(r.reason||"silent"); el.className="err"; }
   });
   device.scaleExt=SCALE_EXT; device.scales=SCALES; device.styleCfg=STYLE;
+  device.renderTimeline=function(){ renderTimelineFor(device); };
   window.__psy6=device;
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",initUi);
