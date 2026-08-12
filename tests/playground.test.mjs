@@ -377,13 +377,13 @@ test("swing shifts odd-16th schedule times (scheduler loop)", async () => {
   const now = dev.ctx.currentTime;
   dev.nextNoteTime = now + 0.001;
   dev.scheduler();
-  const tNoSwing = bassTimes[bassTimes.length - 1];
+  const tNoSwing = bassTimes[0]; // first scheduled note = the odd step
   // same odd step with swing=1 -> must be later by swing*stepDur*0.5
   dev.swing = 1; dev._barCacheKey = -1; bassTimes.length = 0;
   dev.absStep = dropStart * 16 + 1;
   dev.nextNoteTime = now + 0.001;
   dev.scheduler();
-  const tSwing = bassTimes[bassTimes.length - 1];
+  const tSwing = bassTimes[0]; // first scheduled note = the odd step
   const expectedShift = 1 * dev.stepDur() * 0.5;
   assert.ok(tSwing > tNoSwing, "swing did not shift odd step");
   assert.ok(Math.abs((tSwing - tNoSwing) - expectedShift) < 1e-9, "shift != swing*stepDur*0.5");
