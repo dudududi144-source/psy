@@ -247,8 +247,10 @@ test("R: arp canonical — deterministic phrase, valid degrees, timeline matches
 
 /* S/T. no Math.random / no wall-clock / no audio-runtime in foundation source */
 test("S/T: foundation source has no Math.random/Date.now/performance.now/setInterval/AudioContext", () => {
+  // strip block + line comments first: doc comments may NAME forbidden concepts
+  const stripped = FOUNDATION_SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
   for (const banned of ["Math.random", "Date.now", "new Date", "performance.now", "setInterval", "setTimeout", "AudioContext", "AudioWorklet", "navigator"]) {
-    assert.ok(!FOUNDATION_SRC.includes(banned), "forbidden token in foundation source: " + banned);
+    assert.ok(!stripped.includes(banned), "forbidden token in foundation source: " + banned);
   }
 });
 
