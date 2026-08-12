@@ -362,6 +362,32 @@ test("scheduler: pre-drop silence gates last-beat kick", async () => {
   for (let s = 0; s < 16; s++) dev.scheduleStep(base + s, 1 + s * 0.1);
   assert.equal(rec.c.kick, 3, "expected 3 kicks (step 12 gated), got " + rec.c.kick);
 });
+test("swing shifts odd-16th schedule times (scheduler loop)", async () => {
+  const env = loadAndRun();
+  const dev = env.sandbox.window.__psy6;
+  await dev.init();
+  const bassTimes = [];
+  dev.voices = { kick() {}, bassNote(t) { bassTimes.push(t); }, leadNote() {}, arpNote() {}, padChord() {},
+                 clap() {}, shaker() {}, openhat() {}, snare() {}, crash() {} };
+  dev.mutes = { KICK: 1, BASS: 0, PERC: 1, LEAD: 1, ARP: 1, PAD: 1 };
+  const dropStart = dev.song.sectionStarts[2];
+  // run scheduler at an odd step (1) with swing=0 -> record time
+  dev.swing = 0; dev._barCacheKey = -1;
+  dev.absStep = dropStart * 16 + 1;
+  const now = dev.ctx.currentTime;
+  dev.nextNoteTime = now + 0.001;
+  dev.scheduler();
+  const tNoSwing = bassTimes[bassTimes.length - 1];
+  // same odd step with swing=1 -> must be later by swing*stepDur*0.5
+  dev.swing = 1; dev._barCacheKey = -1; bassTimes.length = 0;
+  dev.absStep = dropStart * 16 + 1;
+  dev.nextNoteTime = now + 0.001;
+  dev.scheduler();
+  const tSwing = bassTimes[bassTimes.length - 1];
+  const expectedShift = 1 * dev.stepDur() * 0.5;
+  assert.ok(tSwing > tNoSwing, "swing did not shift odd step");
+  assert.ok(Math.abs((tSwing - tNoSwing) - expectedShift) < 1e-9, "shift != swing*stepDur*0.5");
+});
 test("timeline renders 7 sections; seekToBar sets position", () => {
   const env = loadAndRun();
   const dev = env.sandbox.window.__psy6;
