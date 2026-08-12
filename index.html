@@ -91,7 +91,7 @@ body{
 <body>
 <header class="topbar">
   <div class="logo">PSY-6<span>GROOVEBOX MK.II</span></div>
-  <div class="subtitle">professional psytrance workstation &middot; arranger &middot; generative engine &middot; fx chain</div>
+  <div class="subtitle">full-on psytrance workstation &middot; phrygian dominant modal engine &middot; arranger &middot; fx chain</div>
 </header>
 <main class="device">
   <section class="panel top-row">
@@ -127,7 +127,7 @@ body{
 </main>
 <footer class="footer mono">
   <a href="https://github.com/dudududi144-source/psy" target="_blank" rel="noopener">source</a>
-  &middot; arranger: INTRO &rarr; BUILD &rarr; DROP &rarr; BREAK &rarr; RISER &rarr; DROP2 &rarr; loop w/ mutation
+  &middot; FULL-ON modal engine v3.0 &middot; arranger: INTRO &rarr; BUILD &rarr; DROP &rarr; BREAK &rarr; RISER &rarr; DROP2 &rarr; loop w/ mutation
 </footer>
 <script>
 "use strict";
@@ -158,7 +158,25 @@ function afHz(f){ return 120*Math.pow(150,f*f); }
 
 /* ---------- constants ---------- */
 var ROOT=33;
-var SCALE=[0,2,3,5,7,8,10];
+/* Psytrance scales (semitones from root). Phrygian Dominant is THE
+   signature Full-On scale: the augmented 2nd (b2->3) is the "psy sound". */
+var SCALES={
+  naturalMinor:[0,2,3,5,7,8,10],
+  harmonicMinor:[0,2,3,5,7,8,11],
+  phrygian:[0,1,3,5,7,8,10],
+  phrygianDominant:[0,1,4,5,7,8,10],
+  doubleHarmonic:[0,1,4,5,7,8,11],
+  minorPentatonic:[0,3,5,7,10]
+};
+var STYLE={
+  name:"FULL-ON",
+  scale:"phrygianDominant",
+  leadDensity:0.70,
+  glideChance:0.30,
+  bassOctaveChance:0.30,
+  bassPassingChance:0.18
+};
+var SCALE=SCALES[STYLE.scale];
 var SCALE_EXT=(function(){
   var a=[],i;
   for(i=0;i<SCALE.length;i++) a.push(SCALE[i]);
@@ -177,20 +195,124 @@ var SECTIONS=[
   {name:"DROP2", bars:8, active:{KICK:1,BASS:1,PERC:1,LEAD:1,ARP:1,PAD:0}, filtStart:1.00, filtEnd:1.00}
 ];
 
-/* ---------- generative patterns (pure function of seed) ---------- */
+/* ---------- generative patterns: Full-On modal engine (pure function of seed) ---------- */
+
+/* stable scale-degree indices (pitch class root or fifth) in SCALE_EXT */
+function stableDegrees(){
+  var st=[];
+  for(var d=0;d<SCALE_EXT.length;d++){
+    var pc=SCALE_EXT[d]%12;
+    if(pc===0||pc===7) st.push(d);
+  }
+  return st;
+}
+function nearestStableDeg(stable,deg){
+  var best=stable[0],bd=999;
+  for(var k=0;k<stable.length;k++){
+    var dd=Math.abs(stable[k]-deg);
+    if(dd<bd){bd=dd;best=stable[k];}
+  }
+  return best;
+}
+/* accent ladder: steps 0/8 strongest, 4/12 mid, off-beats low */
+function accentFor(step){ return (step%8===0)?2:((step%4===0)?1:0); }
+
+/* Lead: 32-step call & response motif on Phrygian Dominant.
+   Bar 1 = motif (stable tones on strong beats, passing motion off-beat).
+   Bar 2 = response (motif shifted +/-1 scale degree, resolves to root). */
+function makeLeadMotif(rnd){
+  var L=SCALE_EXT.length;
+  var stable=stableDegrees();
+  function genBar(deg){
+    var bar=[];
+    for(var s=0;s<16;s++){
+      var strong=(s%4===0);
+      var prob=strong?0.92:STYLE.leadDensity;
+      if(rnd()<prob){
+        if(strong){ deg=nearestStableDeg(stable,deg); }
+        else{
+          var move=Math.floor(rnd()*5)-2;
+          deg=clamp(deg+move,0,L-1);
+        }
+        bar.push(deg);
+      } else bar.push(null);
+    }
+    return {bar:bar,lastDeg:deg};
+  }
+  var startDeg=stable[Math.floor(rnd()*stable.length)];
+  var A=genBar(startDeg);
+  var cnt=0,q;
+  for(q=0;q<16;q++) if(A.bar[q]!==null) cnt++;
+  if(cnt<5){
+    var forced=[0,4,8,12];
+    for(q=0;q<forced.length;q++) if(A.bar[forced[q]]===null) A.bar[forced[q]]=nearestStableDeg(stable,A.lastDeg);
+  }
+  var shift=(rnd()<0.5)?1:-1;
+  var resp=[];
+  var s2;
+  for(s2=0;s2<16;s2++){
+    if(A.bar[s2]===null) resp.push(null);
+    else resp.push(clamp(A.bar[s2]+shift,0,L-1));
+  }
+  for(var s3=15;s3>=0;s3--){
+    if(resp[s3]!==null){ resp[s3]=nearestStableDeg(stable,0); break; }
+  }
+  var lead=[];
+  var prevDeg=null;
+  function push(sIdx,deg){
+    var slide=0;
+    if(prevDeg!==null){
+      var iv=Math.abs(SCALE_EXT[deg]-SCALE_EXT[prevDeg]);
+      if((iv===2||iv===3)&&rnd()<STYLE.glideChance) slide=1;
+    }
+    lead.push({deg:deg,acc:accentFor(sIdx),slide:slide});
+    prevDeg=deg;
+  }
+  var s4;
+  for(s4=0;s4<16;s4++){
+    if(A.bar[s4]===null) lead.push(null);
+    else push(s4,A.bar[s4]);
+  }
+  for(s4=0;s4<16;s4++){
+    if(resp[s4]===null) lead.push(null);
+    else push(s4,resp[s4]);
+  }
+  return lead;
+}
+
+/* Arp: spiral over root-b2-3-5-octave (signature Phrygian Dominant colors) */
+function makeArpPhrase(rnd){
+  var arp=[];
+  var pool=[0,1,2,4,7];
+  var ai=Math.floor(rnd()*pool.length);
+  var dir=1;
+  for(var s=0;s<16;s++){
+    if(rnd()<0.85){
+      arp.push({deg:pool[ai]});
+      ai+=dir;
+      if(ai>=pool.length){ ai=pool.length-2; dir=-1; }
+      if(ai<0){ ai=1; dir=1; }
+    } else arp.push(null);
+  }
+  return arp;
+}
+
 function makePatterns(seed){
   var rnd=mulberry32(seed);
-  var s,i;
+  var s;
+  /* kick: four-on-the-floor */
   var kick=[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0];
+  /* bass: K-B-B-B rolling gallop, root drone + passing tones + octave lift */
   var bass=[];
-  var bassSteps=[1,2,3,5,6,7,9,10,11,13,14,15];
   for(s=0;s<16;s++){
-    if(bassSteps.indexOf(s)===-1){ bass.push(null); continue; }
+    if(s%4===0){ bass.push(null); continue; }
     var n=0;
-    if(s===7||s===15){ var opts=[0,3,-2,5,7]; n=opts[Math.floor(rnd()*opts.length)]; }
-    else if(s===11&&rnd()<0.3){ n=12; }
+    var r=rnd();
+    if(s===15&&r<STYLE.bassOctaveChance){ n=12; }
+    else if((s===7||s===11)&&r<STYLE.bassPassingChance){ n=(rnd()<0.5)?10:7; }
     bass.push({n:n});
   }
+  /* perc: claps on 2 & 4, shakers, occasional open hat */
   var perc=[];
   for(s=0;s<16;s++){
     if(s===4||s===12){ perc.push("clap"); continue; }
@@ -199,38 +321,14 @@ function makePatterns(seed){
     if(s%2===1&&rnd()<0.30){ perc.push("shaker"); continue; }
     perc.push(null);
   }
-  var lead=[];
-  var deg=4+Math.floor(rnd()*5);
-  var count=0;
-  for(s=0;s<16;s++){
-    if(rnd()<0.55){
-      var move=Math.floor(rnd()*5)-2;
-      deg=clamp(deg+move,0,SCALE_EXT.length-3);
-      lead.push({deg:deg,acc:(rnd()<0.25)?1:0,slide:(rnd()<0.2&&count>0)?1:0});
-      count++;
-    } else lead.push(null);
-  }
-  if(count<4){
-    var forced=[2,6,10,14];
-    for(i=0;i<forced.length;i++){
-      if(!lead[forced[i]]) lead[forced[i]]={deg:clamp(deg,0,SCALE_EXT.length-3),acc:0,slide:0};
-    }
-  }
-  var arp=[];
-  var pool=[0,2,4,7,11];
-  var ai=Math.floor(rnd()*pool.length);
-  for(s=0;s<16;s++){
-    if(rnd()<0.85){
-      ai=(ai+1+Math.floor(rnd()*2))%pool.length;
-      var degA=pool[ai];
-      if(rnd()<0.15&&degA+7<SCALE_EXT.length) degA=degA+7;
-      arp.push({deg:degA});
-    } else arp.push(null);
-  }
-  var chordPool=[[0,2,4],[0,4,7],[0,2,4,7],[0,5,7]];
+  /* lead: 2-bar call & response motif */
+  var lead=makeLeadMotif(rnd);
+  /* arp: Phrygian Dominant spiral */
+  var arp=makeArpPhrase(rnd);
+  /* pad: root-fifth-octave drone (modal, no third) */
   var pad=[];
   for(s=0;s<16;s++) pad.push(null);
-  pad[0]={chord:chordPool[Math.floor(rnd()*chordPool.length)]};
+  pad[0]={chord:[0,4,7]};
   return {kick:kick,bass:bass,perc:perc,lead:lead,arp:arp,pad:pad};
 }
 
@@ -239,14 +337,14 @@ function makeVoices(ctx,outMap,sends,noiseBuf,cfg){
   function kick(t){
     var o=ctx.createOscillator(),g=ctx.createGain();
     o.type="sine";
-    o.frequency.setValueAtTime(160,t);
-    o.frequency.exponentialRampToValueAtTime(43,t+0.095);
+    o.frequency.setValueAtTime(150,t);
+    o.frequency.exponentialRampToValueAtTime(55,t+0.04);
     g.gain.setValueAtTime(1.0,t);
-    g.gain.exponentialRampToValueAtTime(0.001,t+0.30);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.10);
     o.connect(g); g.connect(outMap.KICK);
-    o.start(t); o.stop(t+0.32);
+    o.start(t); o.stop(t+0.13);
     var cs=ctx.createBufferSource(); cs.buffer=noiseBuf;
-    var bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value=3800; bp.Q.value=1.2;
+    var bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value=3000; bp.Q.value=1.2;
     var cg=ctx.createGain();
     cg.gain.setValueAtTime(0.35,t);
     cg.gain.exponentialRampToValueAtTime(0.001,t+0.015);
@@ -284,12 +382,13 @@ function makeVoices(ctx,outMap,sends,noiseBuf,cfg){
       o1.frequency.value=f; o2.frequency.value=f*d;
     }
     var flt=ctx.createBiquadFilter(); flt.type="lowpass"; flt.Q.value=cfg.leadRes;
-    var peak=Math.min(cfg.leadCut*(opts.acc?1.35:1),ctx.sampleRate*0.42);
+    var acc=opts.acc||0;
+    var peak=Math.min(cfg.leadCut*(acc===2?1.4:(acc===1?1.2:1.0)),ctx.sampleRate*0.42);
     flt.frequency.setValueAtTime(280,t);
     flt.frequency.exponentialRampToValueAtTime(Math.max(300,peak),t+0.016);
     flt.frequency.exponentialRampToValueAtTime(380,t+0.22);
     var g=ctx.createGain();
-    var lvl=cfg.leadLvl*(opts.acc?1.0:0.72);
+    var lvl=cfg.leadLvl*(acc===2?1.0:(acc===1?0.85:0.7));
     g.gain.setValueAtTime(0.0001,t);
     g.gain.exponentialRampToValueAtTime(lvl,t+0.009);
     g.gain.exponentialRampToValueAtTime(0.001,t+0.24);
@@ -607,19 +706,19 @@ Groovebox.prototype.scheduleStep=function(absStep,t){
   var v=this.voices;
   if(!v) return;
   var sd=this.stepDur();
-  if(p.kick[step]&&sec.active.KICK&&!m.KICK){
+  if(p.kick[absStep%p.kick.length]&&sec.active.KICK&&!m.KICK){
     v.kick(t);
     if(this.duck){
       this.duck.gain.cancelScheduledValues(t);
       this.duck.gain.setValueAtTime(1,t);
-      this.duck.gain.setTargetAtTime(0.22,t,0.008);
-      this.duck.gain.setTargetAtTime(1.0,t+0.10,0.05);
+      this.duck.gain.setTargetAtTime(0.40,t,0.006);
+      this.duck.gain.setTargetAtTime(1.0,t+0.055,0.03);
     }
   }
-  var bn=p.bass[step];
-  if(bn&&sec.active.BASS&&!m.BASS) v.bassNote(t,ROOT+bn.n,sd*0.95);
+  var bn=p.bass[absStep%p.bass.length];
+  if(bn&&sec.active.BASS&&!m.BASS) v.bassNote(t,ROOT+bn.n,sd*0.8);
   if(sec.active.PERC&&!m.PERC){
-    var pe=p.perc[step];
+    var pe=p.perc[absStep%p.perc.length];
     if(pe==="clap") v.clap(t,0.8);
     else if(pe==="shaker") v.shaker(t,0.55);
     else if(pe==="oh") v.openhat(t,0.45);
@@ -632,15 +731,15 @@ Groovebox.prototype.scheduleStep=function(absStep,t){
       }
     }
   }
-  var ln=p.lead[step];
+  var ln=p.lead[absStep%p.lead.length];
   if(ln&&sec.active.LEAD&&!m.LEAD){
     var midi=ROOT+24+SCALE_EXT[ln.deg];
-    v.leadNote(t,midi,{acc:!!ln.acc,slide:!!(ln.slide&&this.lastLeadMidi),fromMidi:this.lastLeadMidi});
+    v.leadNote(t,midi,{acc:ln.acc||0,slide:!!(ln.slide&&this.lastLeadMidi),fromMidi:this.lastLeadMidi});
     this.lastLeadMidi=midi;
   }
-  var an=p.arp[step];
+  var an=p.arp[absStep%p.arp.length];
   if(an&&sec.active.ARP&&!m.ARP) v.arpNote(t,ROOT+24+SCALE_EXT[an.deg],step%4===0);
-  var pd=p.pad[step];
+  var pd=p.pad[absStep%p.pad.length];
   if(pd&&sec.active.PAD&&!m.PAD){
     var midis=[];
     for(var i=0;i<pd.chord.length;i++) midis.push(ROOT+12+SCALE_EXT[pd.chord[i]]);
@@ -664,7 +763,7 @@ Groovebox.prototype.updateLcd=function(){
   var sec=SECTIONS[this.arr.secIdx];
   var l1=$("lcd1"),l2=$("lcd2");
   if(l1) l1.textContent=sec.name+"  BAR "+(this.arr.barInSec+1)+"/"+sec.bars;
-  if(l2) l2.textContent="BPM "+Math.round(this.bpm)+"  VAR "+this.variation+"  CYCLE "+this.arr.cycle;
+  if(l2) l2.textContent=STYLE.name+"  BPM "+Math.round(this.bpm)+"  VAR "+this.variation+"  CYCLE "+this.arr.cycle;
 };
 Groovebox.prototype.selfTest=function(){
   var OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
@@ -688,7 +787,7 @@ Groovebox.prototype.selfTest=function(){
     if(pe==="clap") voices.clap(t,0.8);
     else if(pe==="shaker") voices.shaker(t,0.55);
     else if(pe==="oh") voices.openhat(t,0.45);
-    var ln=p.lead[s]; if(ln) voices.leadNote(t,ROOT+24+SCALE_EXT[ln.deg],{acc:!!ln.acc});
+    var ln=p.lead[s%p.lead.length]; if(ln) voices.leadNote(t,ROOT+24+SCALE_EXT[ln.deg],{acc:ln.acc||0});
     var an=p.arp[s]; if(an) voices.arpNote(t,ROOT+24+SCALE_EXT[an.deg],s%4===0);
   }
   return octx.startRendering().then(function(rendered){
@@ -700,7 +799,7 @@ Groovebox.prototype.selfTest=function(){
 };
 Groovebox.prototype.report=function(){
   var sec=SECTIONS[this.arr.secIdx];
-  return {playing:this.isPlaying,bpm:Math.round(this.bpm),
+  return {version:"3.0.0-m1-fullon",style:STYLE.name,playing:this.isPlaying,bpm:Math.round(this.bpm),
     section:sec.name,bar:this.arr.barInSec,cycle:this.arr.cycle,variation:this.variation,
     step:this.absStep%16,absStep:this.absStep,energy:+this.getEnergy().toFixed(4),
     mutes:JSON.parse(JSON.stringify(this.mutes))};
@@ -822,7 +921,7 @@ function toggleStep(part,s){
   }
   else if(part==="LEAD"){ p.lead[s]=p.lead[s]?null:{deg:4,acc:0,slide:0}; }
   else if(part==="ARP"){ p.arp[s]=p.arp[s]?null:{deg:4}; }
-  else if(part==="PAD"){ p.pad[s]=p.pad[s]?null:{chord:[0,2,4]}; }
+  else if(part==="PAD"){ p.pad[s]=p.pad[s]?null:{chord:[0,4,7]}; }
   refreshStepUi(part,s);
   trackEvent("step_edited",{part:part,step:s});
 }
@@ -961,6 +1060,7 @@ function initUi(){
     if(r.ok){ el.textContent="OK rms "+r.rms+" pk "+r.peak; el.className="ok"; }
     else{ el.textContent="FAIL: "+(r.reason||"silent"); el.className="err"; }
   });
+  device.scaleExt=SCALE_EXT; device.scales=SCALES; device.styleCfg=STYLE;
   window.__psy6=device;
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",initUi);
