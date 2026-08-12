@@ -343,8 +343,10 @@ test("scheduler: BREAK lead uses harmonic-minor pitches", async () => {
     for (let s = 0; s < 16; s++) dev.scheduleStep(base + s, 1 + s * 0.1);
   }
   assert.ok(rec.c.lead >= 1, "break lead fired");
-  const HM = new Set([0, 2, 3, 5, 7, 8, 11]);
-  for (const m of rec.c.leadMidis) assert.ok(HM.has(((m % 12) + 12) % 12), "non-HM pitch " + m);
+  // Harmonic-minor pitch classes, offset by the actual key root (ROOT=33 -> A, pc 9).
+  const rootPC = ((dev.song.root % 12) + 12) % 12;
+  const HM = new Set([0, 2, 3, 5, 7, 8, 11].map((x) => (rootPC + x) % 12));
+  for (const m of rec.c.leadMidis) assert.ok(HM.has(((m % 12) + 12) % 12), "non-HM pitch " + m + " (root pc " + rootPC + ")");
 });
 test("scheduler: pre-drop silence gates last-beat kick", async () => {
   const env = loadAndRun();
