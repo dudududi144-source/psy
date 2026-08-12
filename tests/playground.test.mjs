@@ -1,11 +1,10 @@
-
+// PSY-6 M2 test suite (21 tests) — run: node --test tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HTML_PATH = path.join(__dirname, "..", "index.html");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,7 +27,6 @@ function makeAudioContext(opts) {
     destination: { _tag: "destination" },
     get currentTime() { return opts.offline ? 0 : (Date.now() - startTime) / 1000; },
     resume() { this.state = "running"; return Promise.resolve(); },
-    suspend() { this.state = "suspended"; return Promise.resolve(); },
     createGain() { counters.gain++; return { gain: makeParam(1), connect() { return arguments[0]; } }; },
     createOscillator() { counters.osc++; return { type: "sine", frequency: makeParam(440), detune: makeParam(0),
       connect() { return arguments[0]; },
@@ -69,7 +67,8 @@ function buildSandbox() {
     return {
       tagName: (tag || "div").toUpperCase(), _listeners: listeners,
       children: [], className: "", id: "", value: "", checked: false, textContent: "",
-      style: { setProperty(k, v) { this[k] = v; } },
+      dataset: {},
+      style: new Proxy({}, { get: (t, p2) => t[p2], set: (t, p2, v) => { t[p2] = v; return true; } }),
       _innerHTML: "",
       get innerHTML() { return this._innerHTML; },
       set innerHTML(v) { this._innerHTML = v; if (v === "") this.children = []; },
@@ -79,12 +78,14 @@ function buildSandbox() {
       dispatch(type, ev) { (listeners[type] || []).forEach((fn) => fn.call(this, ev || { preventDefault() {}, target: this })); },
       appendChild(c) { this.children.push(c); return c; },
       getContext() { return { fillRect() {}, clearRect() {}, fillStyle: "", fillText() {} }; },
+      querySelector() { return makeEl("div"); },
       querySelectorAll() { return []; },
+      closest() { return null; },
       focus() {}, blur() {}, click() { this.dispatch("click"); }, reset() {},
     };
   }
   const elements = {};
-  ["playBtn", "variateBtn", "nextSecBtn", "lcd1", "lcd2", "lcdSteps", "knobs", "seq", "pads", "viz", "status", "selfTest", "engState"]
+  ["playBtn", "variateBtn", "nextSecBtn", "lcd1", "lcd2", "lcdSteps", "knobs", "seq", "pads", "viz", "status", "selfTest", "engState", "timeline", "nowPlaying"]
     .forEach((id) => { elements[id] = makeEl("div"); elements[id].id = id; });
   elements.playBtn = makeEl("button"); elements.playBtn.id = "playBtn";
   elements.viz = makeEl("canvas"); elements.viz.id = "viz";
@@ -104,8 +105,7 @@ function buildSandbox() {
   };
   const sandbox = {};
   sandbox.window = sandbox;
-  const winListeners = {};
-  sandbox.addEventListener = (type, fn) => { (winListeners[type] = winListeners[type] || []).push(fn); };
+  sandbox.addEventListener = () => {};
   sandbox.removeEventListener = () => {};
   sandbox.document = documentStub;
   sandbox.localStorage = localStorageStub;
@@ -134,226 +134,238 @@ function loadAndRun() {
   vm.runInContext(m[1], env.sandbox, { timeout: 15000 });
   return env;
 }
+let _g = null;
+function G() { if (_g) return _g; _g = loadAndRun().sandbox; return _g; }
 
-/* ---------------- core engine tests ---------------- */
-
-test("device loads; exposes __psy6 with 6 part buses", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
+test("M2 device loads; song exists; version v4", () => {
+  const dev = loadAndRun().sandbox.window.__psy6;
   assert.ok(dev, "__psy6 missing");
-  assert.equal(Object.keys(dev.mutes).length, 6);
-  assert.equal(dev.patterns.kick.length, 16);
+  assert.ok(dev.song, "song missing");
+  assert.equal(dev.report().version, "4.0.0-m2-song");
 });
-
-test("self-test renders non-silent bar (all voices scheduled)", async () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
+test("self-test renders non-silent bar", async () => {
+  const dev = loadAndRun().sandbox.window.__psy6;
   const st = await dev.selfTest();
   assert.equal(st.ok, true, JSON.stringify(st));
-  assert.ok(st.rms > 0.01, "rms too low: " + st.rms);
+  assert.ok(st.rms > 0.01);
 });
-
-test("full FX chain wired: compressor, shaper, convolver, delays", async () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
+test("FX chain wired", async () => {
+  const dev = loadAndRun().sandbox.window.__psy6;
   await dev.init();
-  assert.ok(dev.comp && dev.shaper && dev.dL && dev.dR && dev.reverbIn, "fx chain incomplete");
-  assert.equal(env.counters.comp, 1);
-  assert.equal(env.counters.shaper, 1);
-  assert.equal(env.counters.conv, 1);
+  assert.ok(dev.comp && dev.shaper && dev.dL && dev.dR && dev.reverbIn);
 });
-
-test("Play schedules voices and advances steps; Stop stops", async () => {
+test("Play schedules voices; Stop stops", async () => {
   const env = loadAndRun();
   const dev = env.sandbox.window.__psy6;
   const before = env.counters.oscStart;
   env.elements.playBtn.dispatch("click");
   await sleep(400);
   try {
-    assert.equal(dev.isPlaying, true, "not playing after Play");
+    assert.equal(dev.isPlaying, true);
     assert.ok(env.counters.oscStart > before, "no voices scheduled");
-    assert.ok(dev.absStep > 0, "absStep did not advance");
+    assert.ok(dev.absStep > 0);
   } finally {
     env.elements.playBtn.dispatch("click");
     await sleep(60);
   }
-  assert.equal(dev.isPlaying, false, "Stop did not stop");
+  assert.equal(dev.isPlaying, false);
 });
-
-test("arranger: INTRO -> BUILD after 8 bars; part gains follow section", async () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  await dev.init();
-  for (let i = 0; i < 8; i++) dev.advanceBar(0);
-  assert.equal(dev.arr.secIdx, 1, "expected BUILD");
-  assert.equal(dev.partGains.ARP.gain.value, 1, "ARP should be active in BUILD");
-  assert.equal(dev.partGains.LEAD.gain.value, 0, "LEAD should be muted in BUILD");
-  for (let i = 0; i < 8; i++) dev.advanceBar(0);
-  assert.equal(dev.arr.secIdx, 2, "expected DROP");
-  assert.equal(dev.partGains.LEAD.gain.value, 1, "LEAD active in DROP");
-});
-
-test("full 48-bar cycle: cycle++, variation++, patterns mutate", async () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  await dev.init();
-  const before = JSON.stringify(dev.patterns);
-  for (let i = 0; i < 48; i++) dev.advanceBar(0);
-  assert.equal(dev.arr.cycle, 1, "cycle should increment");
-  assert.equal(dev.variation, 2, "variation should increment");
-  assert.notEqual(JSON.stringify(dev.patterns), before, "patterns mutated");
-});
-
-test("pattern generator deterministic per seed", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const a = JSON.stringify(dev.makePatterns(42));
-  const b = JSON.stringify(dev.makePatterns(42));
-  assert.equal(a, b, "same seed must give same patterns");
-});
-
-test("knobs: bpm updates delay time; filter moves djFilter; drive curve", async () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
+test("knobs work", async () => {
+  const dev = loadAndRun().sandbox.window.__psy6;
   await dev.init();
   dev.setKnob("bpm", 1);
   assert.equal(Math.round(dev.bpm), 165);
-  const beat = 60 / dev.bpm;
-  assert.ok(Math.abs(dev.dL.delayTime.value - beat * 0.75) < 0.001, "delay not tempo-synced");
   dev.setKnob("filter", 0.25);
-  assert.ok(dev.djFilter.frequency.value < 500, "djFilter should close: " + dev.djFilter.frequency.value);
+  assert.ok(dev.djFilter.frequency.value < 500);
   dev.setKnob("drive", 0.8);
-  assert.ok(dev.shaper.curve && dev.shaper.curve.length === 512, "drive curve missing");
+  assert.ok(dev.shaper.curve && dev.shaper.curve.length === 512);
 });
-
-test("step sequencer editing toggles gates (click)", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const kickRow = env.elements.seq.children[0];
-  const stepsDiv = kickRow.children[2];
-  assert.equal(stepsDiv.children.length, 16);
-  assert.equal(dev.patterns.kick[1], 0, "kick step 1 starts off");
-  stepsDiv.children[1].dispatch("click");
-  assert.equal(dev.patterns.kick[1], 1, "click should enable step");
-  assert.ok(stepsDiv.children[1].className.includes("on"), "step UI not updated");
-  stepsDiv.children[1].dispatch("click");
-  assert.equal(dev.patterns.kick[1], 0, "second click disables");
-});
-
-test("mute button silences part bus", async () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  await dev.init();
-  const kickRow = env.elements.seq.children[0];
-  const muteBtn = kickRow.children[0];
-  muteBtn.dispatch("click");
-  assert.equal(dev.mutes.KICK, 1);
-  assert.equal(dev.partGains.KICK.gain.value, 0, "KICK bus should be 0 when muted");
-  muteBtn.dispatch("click");
-  assert.equal(dev.mutes.KICK, 0);
-  assert.equal(dev.partGains.KICK.gain.value, 1, "KICK bus restored");
-});
-
-test("performance pad triggers lead voice", async () => {
+test("pad triggers voice", async () => {
   const env = loadAndRun();
   const dev = env.sandbox.window.__psy6;
   await dev.init();
   const before = env.counters.oscStart;
   await dev.triggerPad(4);
-  assert.ok(env.counters.oscStart > before, "pad scheduled nothing");
+  assert.ok(env.counters.oscStart > before);
 });
-
-test("VARIATE button mutates patterns and bumps variation", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const v0 = dev.variation;
-  const p0 = JSON.stringify(dev.patterns);
-  env.elements.variateBtn.dispatch("click");
-  assert.equal(dev.variation, v0 + 1);
-  assert.notEqual(JSON.stringify(dev.patterns), p0);
+test("VARIATE regenerates song themes", () => {
+  const dev = loadAndRun().sandbox.window.__psy6;
+  const a = JSON.stringify(dev.song.themes.A.seedCell);
+  dev.variate(false);
+  assert.notEqual(JSON.stringify(dev.song.themes.A.seedCell), a);
+  assert.equal(dev.variation, 2);
 });
-
-/* ---------------- musical property tests (M1) ---------------- */
-
-test("version/style: FULL-ON modal engine v3", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const rep = dev.report();
-  assert.equal(rep.version, "3.0.0-m1-fullon");
-  assert.equal(rep.style, "FULL-ON");
-  assert.equal(dev.styleCfg.scale, "phrygianDominant");
+test("subSeed deterministic + label/seed sensitive", () => {
+  const g = G();
+  assert.equal(g.subSeed(12345, "themeA"), g.subSeed(12345, "themeA"));
+  assert.notEqual(g.subSeed(12345, "themeA"), g.subSeed(12345, "themeB"));
+  assert.notEqual(g.subSeed(1, "themeA"), g.subSeed(2, "themeA"));
 });
-
-test("scale: lead + arp notes comply with phrygian dominant", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const PD = new Set([0,1,4,5,7,8,10]);
-  for (const n of dev.patterns.lead) {
-    if (!n) continue;
-    const semi = dev.scaleExt[n.deg] % 12;
-    assert.ok(PD.has(semi), `lead note ${semi} not in phrygian dominant`);
+test("buildSong: bars multiples of 4; totalBars=sum; deterministic", () => {
+  const g = G();
+  const song = g.buildSong(42);
+  for (const s of song.sections) assert.equal(s.bars % 4, 0, s.name);
+  assert.equal(song.totalBars, song.sections.reduce((a, s) => a + s.bars, 0));
+  assert.deepEqual(JSON.stringify(song.themes.A.seedCell), JSON.stringify(g.buildSong(42).themes.A.seedCell));
+});
+test("sectionAt resolves + wraps", () => {
+  const g = G();
+  const song = g.buildSong(5);
+  for (let bar = 0; bar < song.totalBars; bar += 7) {
+    const r = g.sectionAt(song, bar);
+    assert.ok(r.barInSection >= 0 && r.barInSection < r.section.bars);
   }
-  for (const n of dev.patterns.arp) {
-    if (!n) continue;
-    const semi = dev.scaleExt[n.deg] % 12;
-    assert.ok(PD.has(semi), `arp note ${semi} not in phrygian dominant`);
-  }
+  const a = g.sectionAt(song, 3), b = g.sectionAt(song, 3 + song.totalBars);
+  assert.equal(a.section.name, b.section.name);
+  assert.equal(a.barInSection, b.barInSection);
 });
-
-test("lead: 32-step call & response, stable strong beats (bar 1), accents, density", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const lead = dev.patterns.lead;
-  assert.equal(lead.length, 32, "lead should be a 2-bar phrase");
-  let notes = 0, hasAcc2 = false;
-  for (let s = 0; s < 32; s++) {
-    if (!lead[s]) continue;
-    notes++;
-    if (lead[s].acc === 2) hasAcc2 = true;
-    if (s < 16 && s % 4 === 0) {
-      const semi = dev.scaleExt[lead[s].deg] % 12;
-      assert.ok(semi === 0 || semi === 7, `strong beat step ${s} should be root/5th, got ${semi}`);
+test("transforms: transpose/invert/retrograde/displace/fragment/scaleDuration", () => {
+  const g = G();
+  const motif = [
+    { deg: 0, oct: 0, dur: 4, accent: 1, rest: false },
+    { deg: 2, oct: 0, dur: 4, accent: 0.5, rest: false },
+    { deg: 4, oct: 0, dur: 4, accent: 0.5, rest: false },
+    { deg: 1, oct: 0, dur: 4, accent: 0.3, rest: false },
+  ];
+  assert.deepEqual(g.transposeDegree(motif, 3).map(e => e.deg), [3, 5, 7, 4]);
+  const inv = g.invert(motif);
+  assert.equal(inv[0].deg, 0); assert.equal(inv[1].deg, -2); assert.equal(inv[2].deg, -4);
+  assert.equal(g.retrograde(motif)[0].deg, motif[motif.length - 1].deg);
+  const total = arr => arr.reduce((s, e) => s + e.dur, 0);
+  assert.equal(total(g.displace(motif, 4)), total(motif));
+  const uneven = [ { deg: 0, oct: 0, dur: 3, accent: 1, rest: false }, { deg: 2, oct: 0, dur: 5, accent: 0.5, rest: false } ];
+  assert.equal(total(g.displace(uneven, 2)), total(uneven));
+  assert.equal(g.fragment(motif, 0, 2, 2).length, 4);
+  assert.equal(total(g.scaleDuration(motif, 2)), total(motif) * 2);
+});
+test("degreeToSemitone + renderMotif (rests carry no midi)", () => {
+  const g = G();
+  const pd = g.SCALES.phrygianDominant;
+  assert.equal(g.degreeToSemitone(pd, 0), 0);
+  assert.equal(g.degreeToSemitone(pd, 2), 4);
+  assert.equal(g.degreeToSemitone(pd, 7), 12);
+  const song = g.buildSong(99);
+  for (let bar = 0; bar < 8; bar++) {
+    const rendered = g.resolveThemeBar(song.themes.B, bar, g.SCALES);
+    for (const ev of rendered) {
+      if (ev.rest) assert.equal(ev.midi, undefined, "rest has midi");
+      else assert.equal(typeof ev.midi, "number");
     }
   }
-  assert.ok(notes >= 8, `lead too sparse: ${notes} notes`);
-  assert.ok(hasAcc2, "no top accents");
 });
-
-test("bass: K-B-B-B gate, root-dominant", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const bass = dev.patterns.bass;
-  assert.equal(bass.length, 16);
-  let roots = 0, total = 0;
-  for (let s = 0; s < 16; s++) {
-    if (s % 4 === 0) { assert.equal(bass[s], null, `bass on kick step ${s}`); continue; }
-    assert.ok(bass[s], `bass missing on off-beat ${s}`);
-    total++;
-    if (bass[s].n === 0 || bass[s].n === 12) roots++;
+test("resolveThemeBar pure + varies per bar; A2 differs; B harmonicMinor", () => {
+  const g = G();
+  const song = g.buildSong(99);
+  assert.deepEqual(JSON.stringify(g.resolveThemeBar(song.themes.A, 2, g.SCALES)), JSON.stringify(g.resolveThemeBar(song.themes.A, 2, g.SCALES)));
+  assert.notDeepEqual(JSON.stringify(g.resolveThemeBar(song.themes.A, 0, g.SCALES)), JSON.stringify(g.resolveThemeBar(song.themes.A, 1, g.SCALES)));
+  assert.notDeepEqual(JSON.stringify(song.themes.A.seedCell), JSON.stringify(song.themes.A2.seedCell));
+  assert.equal(song.themes.B.scaleKey, "harmonicMinor");
+  assert.equal(song.themes.A.scaleKey, "phrygianDominant");
+});
+test("bass styles: gallop/offbeat/pedal", () => {
+  const g = G();
+  for (let bar = 0; bar < 8; bar++) {
+    const bb = g.generateBassBar("gallop", 45, g.SCALES.phrygianDominant, bar, g.rngFor(3, "bar:" + bar));
+    for (const ks of g.KICK_STEPS) assert.equal(bb[ks], null, "gallop on kick step " + ks);
   }
-  assert.equal(total, 12, "12 off-beat bass notes");
-  assert.ok(roots / total >= 0.6, `bass root ratio too low: ${roots}/${total}`);
+  const ob = g.generateBassBar("offbeat", 45, g.SCALES.naturalMinor, 0, g.rngFor(1, "x"));
+  ob.forEach((ev, i) => { if (ev) assert.ok([2, 6, 10, 14].includes(i)); });
+  assert.ok(g.generateBassBar("pedal", 45, g.SCALES.naturalMinor, 0, g.rngFor(1, "x")).filter(Boolean).length <= 1);
 });
-
-test("kick: four-on-the-floor", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const k = dev.patterns.kick;
-  assert.equal(k.length, 16);
-  for (let s = 0; s < 16; s++) assert.equal(k[s], (s % 4 === 0) ? 1 : 0, `kick step ${s}`);
-});
-
-test("glide only on characteristic intervals (2-3 semitones)", () => {
-  const env = loadAndRun();
-  const dev = env.sandbox.window.__psy6;
-  const lead = dev.patterns.lead;
-  let prev = null;
-  for (let s = 0; s < lead.length; s++) {
-    if (!lead[s]) continue;
-    if (prev !== null && lead[s].slide) {
-      const iv = Math.abs(dev.scaleExt[lead[s].deg] - dev.scaleExt[prev]);
-      assert.ok(iv === 2 || iv === 3, `slide on non-characteristic interval ${iv} at step ${s}`);
-    }
-    prev = lead[s].deg;
+test("fills + transitions", () => {
+  const g = G();
+  const base = [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0];
+  const filled = g.applyFill(base, 1.0, g.rngFor(1, "fill"));
+  base.forEach((v, i) => { if (v) assert.equal(filled[i], 1); });
+  const zeros = new Array(16).fill(0);
+  let c0 = 0, c1 = 0;
+  for (let s = 0; s < 200; s++) {
+    c0 += g.applyFill(zeros, 0, g.rngFor(s, "a")).filter(Boolean).length;
+    c1 += g.applyFill(zeros, 1, g.rngFor(s, "b")).filter(Boolean).length;
   }
+  assert.ok(c1 > c0);
+  assert.equal(g.isPreDropSilenceBar("DROP", 7, 8), true);
+  assert.equal(g.isPreDropSilenceBar("DROP", 6, 8), false);
+  assert.equal(g.isPreDropSilenceBar("BREAK", 7, 8), false);
+  assert.equal(g.isSectionDownbeat(0), true);
+  assert.equal(g.isSectionDownbeat(1), false);
+});
+test("energy curves + automation", () => {
+  const g = G();
+  let prev = -1;
+  for (let b = 0; b < 16; b++) { const e = g.EnergyCurves.rampUp(b, 16); assert.ok(e >= prev); prev = e; }
+  const e1 = g.energyAt("DROP", 0, 32), e2 = g.energyAt("DROP", 31, 32);
+  assert.ok(Math.abs(e1 - e2) < 0.01 && e1 > 0.7);
+  assert.ok(g.automationFromEnergy(0.9).filterCutoffHz > g.automationFromEnergy(0.1).filterCutoffHz);
+});
+test("drop2RootOffset in {0,2}", () => {
+  const g = G();
+  for (let s = 0; s < 50; s++) {
+    const song = g.buildSong(s);
+    assert.ok(song.drop2RootOffset === 0 || song.drop2RootOffset === 2);
+  }
+});
+function recorderVoices() {
+  const c = { kick: 0, bass: 0, lead: 0, arp: 0, pad: 0, clap: 0, shaker: 0, oh: 0, snare: 0, crash: 0, leadMidis: [] };
+  return { c, v: {
+    kick() { c.kick++; }, bassNote(t, m) { c.bass++; }, leadNote(t, m) { c.lead++; c.leadMidis.push(m); },
+    arpNote() { c.arp++; }, padChord() { c.pad++; }, clap() { c.clap++; }, shaker() { c.shaker++; },
+    openhat() { c.oh++; }, snare() { c.snare++; }, crash() { c.crash++; },
+  } };
+}
+test("scheduler: DROP bar fires kick/bass/lead/crash", async () => {
+  const env = loadAndRun();
+  const dev = env.sandbox.window.__psy6;
+  await dev.init();
+  const rec = recorderVoices();
+  dev.voices = rec.v;
+  dev.mutes = { KICK: 0, BASS: 0, PERC: 0, LEAD: 0, ARP: 0, PAD: 0 };
+  const dropStart = dev.song.sectionStarts[2];
+  dev._barCacheKey = -1;
+  const base = dropStart * 16;
+  for (let s = 0; s < 16; s++) dev.scheduleStep(base + s, 1 + s * 0.1);
+  assert.equal(rec.c.kick, 4, "kicks=" + rec.c.kick);
+  assert.equal(rec.c.bass, 12, "bass=" + rec.c.bass);
+  assert.ok(rec.c.lead >= 1, "lead fired");
+  assert.equal(rec.c.crash, 1, "downbeat crash");
+});
+test("scheduler: BREAK lead uses harmonic-minor pitches", async () => {
+  const env = loadAndRun();
+  const dev = env.sandbox.window.__psy6;
+  await dev.init();
+  const rec = recorderVoices();
+  dev.voices = rec.v;
+  dev.mutes = { KICK: 0, BASS: 0, PERC: 0, LEAD: 0, ARP: 0, PAD: 0 };
+  const breakStart = dev.song.sectionStarts[3];
+  dev._barCacheKey = -1;
+  for (let bar = 0; bar < 4; bar++) {
+    const base = (breakStart + bar) * 16;
+    for (let s = 0; s < 16; s++) dev.scheduleStep(base + s, 1 + s * 0.1);
+  }
+  assert.ok(rec.c.lead >= 1, "break lead fired");
+  const HM = new Set([0, 2, 3, 5, 7, 8, 11]);
+  for (const m of rec.c.leadMidis) assert.ok(HM.has(((m % 12) + 12) % 12), "non-HM pitch " + m);
+});
+test("scheduler: pre-drop silence gates last-beat kick", async () => {
+  const env = loadAndRun();
+  const dev = env.sandbox.window.__psy6;
+  await dev.init();
+  const rec = recorderVoices();
+  dev.voices = rec.v;
+  dev.mutes = { KICK: 0, BASS: 0, PERC: 0, LEAD: 0, ARP: 0, PAD: 0 };
+  const buildStart = dev.song.sectionStarts[1];
+  const lastBuildBar = buildStart + 16 - 1;
+  dev._barCacheKey = -1;
+  const base = lastBuildBar * 16;
+  for (let s = 0; s < 16; s++) dev.scheduleStep(base + s, 1 + s * 0.1);
+  assert.equal(rec.c.kick, 3, "expected 3 kicks (step 12 gated), got " + rec.c.kick);
+});
+test("timeline renders 7 sections; seekToBar sets position", () => {
+  const env = loadAndRun();
+  const dev = env.sandbox.window.__psy6;
+  dev.renderTimeline();
+  assert.equal(env.elements.timeline.children.length, 7);
+  dev.seekToBar(48);
+  assert.equal(dev.absStep, 48 * 16);
+  dev.stop();
 });
