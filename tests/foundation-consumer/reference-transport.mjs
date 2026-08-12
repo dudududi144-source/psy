@@ -71,12 +71,11 @@ export class ReferenceTransport {
 
   // ---- read-only API (the ONLY thing a consumer may use) ----
   now() { throw new Error("transport.now() must be called with an injected audio clock by the product; transport holds no clock of its own"); }
-  bpmAt(audioTime) { this._applyDecay(audioTime); return this._bpm; }
-  confidenceAt(audioTime) { this._applyDecay(audioTime); return this._confidence; }
-  lockedAt(audioTime) { this._applyDecay(audioTime); return this._locked; }
+  bpmAt(audioTime) { return this._bpm; }
+  confidenceAt(audioTime) { return this._effectiveConfidenceAt(audioTime); }
+  lockedAt(audioTime) { return this._lockedAtTime(audioTime); }
 
   gridAt(audioTime) {
-    this._applyDecay(audioTime);
     const period = 60 / this._bpm;
     const beatsSince = (audioTime - this._lastBeatAudioTime) / period;
     const phase = ((this._phase + beatsSince) % 1 + 1) % 1;
@@ -90,8 +89,8 @@ export class ReferenceTransport {
       lastBeatAudioTime: this._lastBeatAudioTime,
       nextBeatAudioTime: audioTime + (1 - phase) * period,
       phaseErrorMs: 0,
-      confidence: this._confidence,
-      locked: this._locked,
+      confidence: this._effectiveConfidenceAt(audioTime),
+      locked: this._lockedAtTime(audioTime),
       updatedAtAudioTime: this._updatedAtAudioTime,
       epoch: 0,
       predictionHorizonMs: 200,
@@ -99,7 +98,6 @@ export class ReferenceTransport {
   }
 
   beatsUpTo(audioTime, horizonMs) {
-    this._applyDecay(audioTime);
     const period = 60 / this._bpm;
     const g = this.gridAt(audioTime);
     const out = [];
@@ -109,15 +107,18 @@ export class ReferenceTransport {
     return out;
   }
 
-  // confidence DECAY over time (gap detection). Called on every read with the
-  // CURRENT audio time so staleness is measured against the audio clock.
-  _applyDecay(audioTime) {
-    if (!this._initialized) return;
-    const dt = audioTime - this._updatedAtAudioTime;
-    if (dt > 0) {
-      this._confidence = Math.max(0, this._confidence - this._decayPerSec * dt);
-      if (this._confidence <= this._lockThreshold) this._locked = false; // unlock on gap
-    }
+  // Confidence DECAY over time (gap detection) — computed PURELY per query.
+  // Reads NEVER mutate state: effective confidence is derived from the base
+  // confidence at _updatedAtAudioTime and the elapsed audio time. observe()
+  // remains the ONLY write path.
+  _effectiveConfidenceAt(audioTime) {
+    if (!this._initialized) return 0;
+    const dt = Math.max(0, audioTime - this._updatedAtAudioTime);
+    return Math.max(0, this._confidence - this._decayPerSec * dt);
+  }
+  _lockedAtTime(audioTime) {
+    return this._initialized && this._locked &&
+      this._effectiveConfidenceAt(audioTime) > this._lockThreshold;
   }
 }
 
