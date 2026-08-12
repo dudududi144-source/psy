@@ -338,7 +338,9 @@ test("bass: K-B-B-B gate, root-dominant", () => {
 test("kick: four-on-the-floor", () => {
   const env = loadAndRun();
   const dev = env.sandbox.window.__psy6;
-  assert.deepEqual(dev.patterns.kick, [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0]);
+  const k = dev.patterns.kick;
+  assert.equal(k.length, 16);
+  for (let s = 0; s < 16; s++) assert.equal(k[s], (s % 4 === 0) ? 1 : 0, `kick step ${s}`);
 });
 
 test("glide only on characteristic intervals (2-3 semitones)", () => {
