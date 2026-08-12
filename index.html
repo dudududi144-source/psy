@@ -296,40 +296,7 @@ function makeArpPhrase(rnd){
   return arp;
 }
 
-function makePatterns(seed){
-  var rnd=mulberry32(seed);
-  var s;
-  /* kick: four-on-the-floor */
-  var kick=[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0];
-  /* bass: K-B-B-B rolling gallop, root drone + passing tones + octave lift */
-  var bass=[];
-  for(s=0;s<16;s++){
-    if(s%4===0){ bass.push(null); continue; }
-    var n=0;
-    var r=rnd();
-    if(s===15&&r<STYLE.bassOctaveChance){ n=12; }
-    else if((s===7||s===11)&&r<STYLE.bassPassingChance){ n=(rnd()<0.5)?10:7; }
-    bass.push({n:n});
-  }
-  /* perc: claps on 2 & 4, shakers, occasional open hat */
-  var perc=[];
-  for(s=0;s<16;s++){
-    if(s===4||s===12){ perc.push("clap"); continue; }
-    if(s===14&&rnd()<0.5){ perc.push("oh"); continue; }
-    if(s%4===2){ perc.push("shaker"); continue; }
-    if(s%2===1&&rnd()<0.30){ perc.push("shaker"); continue; }
-    perc.push(null);
-  }
-  /* lead: 2-bar call & response motif */
-  var lead=makeLeadMotif(rnd);
-  /* arp: Phrygian Dominant spiral */
-  var arp=makeArpPhrase(rnd);
-  /* pad: root-fifth-octave drone (modal, no third) */
-  var pad=[];
-  for(s=0;s<16;s++) pad.push(null);
-  pad[0]={chord:[0,4,7]};
-  return {kick:kick,bass:bass,perc:perc,lead:lead,arp:arp,pad:pad};
-}
+
 
 /* ---------- synth voices ---------- */
 function makeVoices(ctx,outMap,sends,noiseBuf,cfg){
@@ -525,6 +492,22 @@ var SECTION_TEMPLATE=[
   ["DROP2",32,"A2","drop2","gallop"],
   ["OUTRO",24,"transition","intro","pedal"]
 ];
+function buildArpPhrase(seed){
+  var rng=rngFor(seed,"arp");
+  var pool=[0,1,2,4,7];
+  var ai=Math.floor(rng()*pool.length);
+  var dir=1;
+  var arp=[];
+  for(var s=0;s<16;s++){
+    if(rng()<0.85){
+      arp.push({deg:pool[ai]});
+      ai+=dir;
+      if(ai>=pool.length){ ai=pool.length-2; dir=-1; }
+      if(ai<0){ ai=1; dir=1; }
+    } else arp.push(null);
+  }
+  return arp;
+}
 function buildSong(seed,opts){
   opts=opts||{};
   var root=opts.root!=null?opts.root:33;
@@ -545,8 +528,9 @@ function buildSong(seed,opts){
     B:buildTheme(seed,"B",root+24,modes.break,{register:-12,emotional:true}),
     transition:buildTransitionTheme(seed,root+24,modes.intro)
   };
-  return {seed:seed,root:root,bpm:bpm,modes:modes,drop2RootOffset:drop2RootOffset,
-    themes:themes,sections:sections,sectionStarts:sectionStarts,totalBars:cursor};
+  return {seed:seed,root:root,bpm:bpm,styleScale:"phrygianDominant",modes:modes,drop2RootOffset:drop2RootOffset,
+    themes:themes,sections:sections,sectionStarts:sectionStarts,totalBars:cursor,
+    arpPhrase:buildArpPhrase(seed)};
 }
 function sectionAt(song,absBar){
   var bar=((absBar%song.totalBars)+song.totalBars)%song.totalBars;
@@ -758,7 +742,6 @@ function Groovebox(){
   this.uiQueue=[];
   this.bpm=145; this.swing=0.12;
   this.seed=1337; this.variation=1;
-  this.patterns=makePatterns(this.seed);
   this.song=buildSong(this.seed);
   this._barCacheKey=-1;
   this._lastSecIdx=-1;
@@ -939,7 +922,6 @@ Groovebox.prototype.seekToBar=function(bar){
 };
 Groovebox.prototype.variate=function(auto){
   this.seed=(this.seed+0x9E3779B9)>>>0;
-  this.patterns=makePatterns(this.seed);
   this.song=buildSong(this.seed);
   this.variation++;
   this.lastLeadMidi=null;
@@ -1025,9 +1007,10 @@ Groovebox.prototype.scheduleStep=function(absStep,t){
       this._leadStepCursor++;
     }
   }
-  if(sectionHasPart(section,"arp")&&!m.ARP){
-    var an=this.patterns.arp[absStep%16];
-    if(an) v.arpNote(t,ROOT+24+SCALE_EXT[an.deg],step%4===0);
+  /* arp: canonical song.arpPhrase (P1 RULE 2 migration) */
+  if(sectionHasPart(section,"arp")&&!m.ARP&&this.song.arpPhrase){
+    var an=this.song.arpPhrase[step];
+    if(an&&!gated) v.arpNote(t,ROOT+24+SCALE_EXT[an.deg],step%4===0);
   }
   if(sectionHasPart(section,"pad")&&!m.PAD&&step===0&&barInSection%2===0){
     v.padChord(t,[bassRoot+12,bassRoot+19,bassRoot+24],sd*32*0.95);
@@ -1098,19 +1081,15 @@ Groovebox.prototype.selfTest=function(){
   for(var i=0;i<PART_NAMES.length;i++){
     var g=octx.createGain(); g.connect(master); outMap[PART_NAMES[i]]=g;
   }
-  var voices=makeVoices(octx,outMap,{delay:null,reverb:null},makeNoiseBuffer(octx),this.cfg());
-  var p=this.patterns;
+  /* P1: self-test renders the canonical song through the same scheduleStep path */
+  var savedVoices=this.voices;
+  this.voices=makeVoices(octx,outMap,{delay:null,reverb:null},makeNoiseBuffer(octx),this.cfg());
+  if(!this.song) this.song=buildSong(this.seed);
+  var dropBar=this.song.sectionStarts[2];
   for(var s=0;s<16;s++){
-    var t=0.05+s*beat/4;
-    if(p.kick[s]) voices.kick(t);
-    var bn=p.bass[s]; if(bn) voices.bassNote(t,ROOT+bn.n,beat/4*0.95);
-    var pe=p.perc[s];
-    if(pe==="clap") voices.clap(t,0.8);
-    else if(pe==="shaker") voices.shaker(t,0.55);
-    else if(pe==="oh") voices.openhat(t,0.45);
-    var ln=p.lead[s%p.lead.length]; if(ln) voices.leadNote(t,ROOT+24+SCALE_EXT[ln.deg],{acc:ln.acc||0});
-    var an=p.arp[s]; if(an) voices.arpNote(t,ROOT+24+SCALE_EXT[an.deg],s%4===0);
+    this.scheduleStep(dropBar*16+s, 0.05+s*beat/4);
   }
+  this.voices=savedVoices;
   return octx.startRendering().then(function(rendered){
     var ch=rendered.getChannelData(0),peak=0,sumSq=0;
     for(var i=0;i<ch.length;i++){ var a=Math.abs(ch[i]); if(a>peak)peak=a; sumSq+=ch[i]*ch[i]; }
@@ -1120,7 +1099,7 @@ Groovebox.prototype.selfTest=function(){
 };
 Groovebox.prototype.report=function(){
   var info=sectionAt(this.song,Math.floor(this.absStep/16));
-  return {version:"4.0.0-m2-song",style:STYLE.name,playing:this.isPlaying,bpm:Math.round(this.bpm),
+  return {version:"5.0.0-p1-foundation",style:STYLE.name,playing:this.isPlaying,bpm:Math.round(this.bpm),
     section:info.section.name,theme:info.section.themeKey,bar:info.barInSection,
     cycle:this.arr.cycle,variation:this.variation,totalBars:this.song.totalBars,
     step:this.absStep%16,absStep:this.absStep,energy:+this.getEnergy().toFixed(4),
@@ -1129,7 +1108,6 @@ Groovebox.prototype.report=function(){
 
 /* ---------- device + UI ---------- */
 var device=new Groovebox();
-device.makePatterns=makePatterns;
 function trackEvent(name,detail){
   try{
     var arr=JSON.parse(localStorage.getItem("psy6_events")||"[]");
@@ -1235,27 +1213,15 @@ function buildSeq(){
   }
 }
 function toggleStep(part,s){
-  var p=device.patterns;
-  if(part==="KICK"){ p.kick[s]=p.kick[s]?0:1; }
-  else if(part==="BASS"){ p.bass[s]=p.bass[s]?null:{n:0}; }
-  else if(part==="PERC"){
-    var cur=p.perc[s];
-    p.perc[s]=cur===null?"clap":cur==="clap"?"shaker":cur==="shaker"?"oh":null;
-  }
-  else if(part==="LEAD"){ p.lead[s]=p.lead[s]?null:{deg:4,acc:0,slide:0}; }
-  else if(part==="ARP"){ p.arp[s]=p.arp[s]?null:{deg:4}; }
-  else if(part==="PAD"){ p.pad[s]=p.pad[s]?null:{chord:[0,4,7]}; }
+  /* P1 RULE 2: ARP is the only editable pattern layer; it lives in the canonical song model */
+  if(part!=="ARP") return;
+  var ap=device.song.arpPhrase;
+  ap[s]=ap[s]?null:{deg:4};
   refreshStepUi(part,s);
   trackEvent("step_edited",{part:part,step:s});
 }
 function stepActive(part,s){
-  var p=device.patterns;
-  if(part==="KICK") return !!p.kick[s];
-  if(part==="BASS") return !!p.bass[s];
-  if(part==="PERC") return !!p.perc[s];
-  if(part==="LEAD") return !!p.lead[s];
-  if(part==="ARP") return !!p.arp[s];
-  if(part==="PAD") return !!p.pad[s];
+  if(part==="ARP") return !!device.song.arpPhrase[s];
   return false;
 }
 function refreshStepUi(part,s){
