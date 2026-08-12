@@ -16,6 +16,4 @@ jobs:
         with:
           node-version: '24'
       - name: Run all test suites (playground + foundation + consumer contract)
-        run: node --test tests/
-      - name: Foundation determinism replay check
-        run: node --test tests/foundation.test.mjs
+        run: node --test tests/*.test.mjs tests/foundation-consumer/*.test.mjs
