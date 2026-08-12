@@ -417,6 +417,9 @@ test("P1 ARP migration: song.arpPhrase canonical; device.patterns retired; DROP 
   dev.variate(false);
   const seq2 = dev.song.arpPhrase.map((a) => a ? a.deg : null).join(",");
   assert.notEqual(seq1, seq2, "variate must regenerate arpPhrase");
+  // recount gates from the CURRENT (post-variate) song before scheduling
+  gates = 0;
+  for (const a of dev.song.arpPhrase) { if (a !== null) gates++; }
   // DROP bar schedules arp events equal to phrase gates
   await dev.init();
   const rec = recorderVoices();
