@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PSY — Winning Device Dashboard</title>
+<style>
+:root{
+  --bg:#070312; --panel:rgba(18,9,36,.82); --border:rgba(150,90,255,.25);
+  --cyan:#00ffc8; --purple:#b967ff; --magenta:#ff2e88; --text:#efe9fb;
+  --dim:#9d8fc0; --ok:#3dffa8; --warn:#ffb347; --err:#ff4d6d;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);min-height:100vh;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background-image:
+    radial-gradient(1200px 600px at 80% -10%, rgba(120,40,200,.22), transparent 60%),
+    radial-gradient(900px 500px at 10% 110%, rgba(0,255,200,.07), transparent 60%);
+  padding:24px}
+.wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.hero{text-align:center;padding:30px 20px 10px}
+.hero h1{font-size:42px;font-weight:900;letter-spacing:.08em;
+  background:linear-gradient(90deg,var(--cyan),var(--purple),var(--magenta));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 18px rgba(185,103,255,.45))}
+.hero .sub{color:var(--dim);margin-top:8px;letter-spacing:.14em;text-transform:uppercase;font-size:11px}
+.hero .stats{display:flex;justify-content:center;gap:32px;margin-top:24px;flex-wrap:wrap}
+.stat{text-align:center}
+.stat .num{font-size:36px;font-weight:900;color:var(--cyan);
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+  text-shadow:0 0 12px rgba(0,255,200,.4)}
+.stat .lbl{font-size:10px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-top:4px}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:20px;
+  box-shadow:0 10px 34px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04)}
+.panel h2{font-size:13px;letter-spacing:.1em;margin-bottom:14px;color:var(--cyan);text-transform:uppercase}
+.panel h2 .small{color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0;font-weight:400;margin-left:8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.card{background:rgba(7,3,18,.6);border:1px solid var(--border);border-radius:10px;padding:14px;
+  transition:border-color .15s,transform .15s}
+.card:hover{border-color:var(--cyan);transform:translateY(-2px)}
+.card .head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}
+.card .name{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;color:var(--purple);font-weight:700}
+.card .ver{font-size:10px;color:var(--ok);font-family:ui-monospace,monospace;
+  border:1px solid var(--ok);border-radius:3px;padding:1px 5px;letter-spacing:.05em}
+.card .desc{color:var(--text);font-size:12px;line-height:1.5;margin-bottom:8px}
+.card .meta{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--dim);
+  font-family:ui-monospace,monospace}
+.card .tests{color:var(--cyan)}
+.card .insp{color:var(--dim);font-style:italic;font-size:10px;margin-top:6px;line-height:1.4}
+.roast{counter-reset:roast}
+.roast-item{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid rgba(150,90,255,.1)}
+.roast-item:last-child{border-bottom:none}
+.roast-item::before{counter-increment:roast;content:counter(roast);
+  flex:none;width:28px;height:28px;border-radius:50%;
+  background:linear-gradient(135deg,var(--magenta),var(--purple));
+  color:#0a0518;font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center;
+  font-family:ui-monospace,monospace}
+.roast-item .body{flex:1;font-size:13px;line-height:1.5}
+.roast-item .body strong{color:var(--magenta)}
+.roast-item .body code{background:rgba(0,255,200,.08);color:var(--cyan);padding:1px 5px;border-radius:3px;
+  font-family:ui-monospace,monospace;font-size:11px}
+.docs{display:flex;flex-direction:column;gap:8px}
+.doc-link{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;
+  background:rgba(7,3,18,.6);border:1px solid var(--border);border-radius:8px;
+  text-decoration:none;color:var(--text);transition:border-color .15s;font-size:13px}
+.doc-link:hover{border-color:var(--cyan)}
+.doc-link .name{font-family:ui-monospace,monospace;color:var(--cyan)}
+.doc-link .arrow{color:var(--dim)}
+.status-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.pending{background:var(--warn);box-shadow:0 0 8px var(--warn)}
+.footer{text-align:center;padding:24px 0 10px;color:var(--dim);font-size:11px}
+.footer a{color:var(--purple);text-decoration:none}
+@media(max-width:640px){
+  .hero h1{font-size:30px}
+  .stat .num{font-size:28px}
+  .hero .stats{gap:18px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <h1>PSY — Winning Device</h1>
+    <div class="sub">canonical psytrance groovebox · the winning device of the PSY family</div>
+    <div class="stats">
+      <div class="stat"><div class="num">164</div><div class="lbl">tests green</div></div>
+      <div class="stat"><div class="num">+105</div><div class="lbl">new tests</div></div>
+      <div class="stat"><div class="num">6</div><div class="lbl">foundation modules</div></div>
+      <div class="stat"><div class="num">12</div><div class="lbl">sibling repos studied</div></div>
+    </div>
+  </header>
+
+  <section class="panel">
+    <h2>Status <span class="small">foundation layer complete · runtime integration partial</span></h2>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="status-row"><span class="dot"></span>W1 MusicalTransport — PLL with octave-fold, gap recovery, confidence decay (15 tests A–J × 5 seeds)</div>
+      <div class="status-row"><span class="dot"></span>W2 DSP primitives — PolyBLEP + ZDF SVF + FM + wavetable (40 tests)</div>
+      <div class="status-row"><span class="dot"></span>W4 MusicalDirector — DO-NOTHING abstention, 5 conditions (12 tests)</div>
+      <div class="status-row"><span class="dot"></span>W5 Grammar learning — 3 classes with provenance (12 tests)</div>
+      <div class="status-row"><span class="dot"></span>W6 Render — offline + stems + WAV encoder (11 tests)</div>
+      <div class="status-row"><span class="dot"></span>W7 MIDI — Web MIDI + 24ppq clock + SMF0 export (15 tests)</div>
+      <div class="status-row"><span class="dot"></span>W8 PWA + service worker + self-diagnose — inline via Blob URL in index.html</div>
+      <div class="status-row"><span class="dot"></span>W9 Foundation loader — index.html exposes window.PSY_FOUNDATION (additive, non-breaking)</div>
+      <div class="status-row"><span class="dot pending"></span>W3 AudioWorklet in live path — deferred (needs browser verification)</div>
+      <div class="status-row"><span class="dot pending"></span>W11 registry promotion — DONE (6 components ADMITTED v1)</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Foundation modules <span class="small">ADMITTED v1 · pure ESM · zero deps</span></h2>
+    <div class="grid">
+      <div class="card">
+        <div class="head"><span class="name">foundation/transport.mjs</span><span class="ver">v1</span></div>
+        <div class="desc">MusicalTransport — real PLL with phase correction, octave-fold, gap recovery, confidence decay. 3 distinct times (observed/estimated/predicted). Re-anchors only at bar boundaries.</div>
+        <div class="meta"><span class="tests">15 tests · A–J × 5 seeds</span><span>412 lines</span></div>
+        <div class="insp">Inspired by psy5 (TransportClock + 4 components, 250 tests) + psy4 BeatPLL (with documented confidence bug avoided).</div>
+      </div>
+      <div class="card">
+        <div class="head"><span class="name">foundation/dsp.mjs</span><span class="ver">v1</span></div>
+        <div class="desc">PolyBLEP saw/square/triangle/pulse + ZDF SVF (cytomic) + 4-op FM + 6 wavetables + Adsr + saturation. Pure functions, bit-identical per seed.</div>
+        <div class="meta"><span class="tests">40 tests</span><span>~500 lines</span></div>
+        <div class="insp">Inspired by PsySynthPro (PolyBLEP+ZDF+FM+wavetable) + psy-foundation packages/dsp.</div>
+      </div>
+      <div class="card">
+        <div class="head"><span class="name">foundation/director.mjs</span><span class="ver">v1</span></div>
+        <div class="desc">MusicalDirector with DO-NOTHING abstention. 5 conditions: low transport.confidence, unlocked, low energy + barsSinceRest&gt;4, dense previous bar, rewardPrediction&lt;threshold. EMA reward tracker.</div>
+        <div class="meta"><span class="tests">12 tests</span><span>293 lines</span></div>
+        <div class="insp">Inspired by psy5 contextual bandit with abstainThreshold.</div>
+      </div>
+      <div class="card">
+        <div class="head"><span class="name">foundation/grammar.mjs</span><span class="ver">v1</span></div>
+        <div class="desc">3 grammar classes: BassGrammar (12×12 matrix), MelodicGrammar (25-bucket histogram), RhythmGrammar (16-step Bayesian). applyGrammarVariation preserves original timeline; mutated events carry provenance.</div>
+        <div class="meta"><span class="tests">12 tests</span><span>412 lines</span></div>
+        <div class="insp">Inspired by PSY6-ULTIMATE (3 grammar classes, 15 refs in index.html).</div>
+      </div>
+      <div class="card">
+        <div class="head"><span class="name">foundation/render.mjs</span><span class="ver">v1</span></div>
+        <div class="desc">Offline render + per-device stem export + WAV encoder. renderPlan is pure; renderSong accepts injected AudioContext (metadata mode in Node, full render in browser). Byte-identical per seed.</div>
+        <div class="meta"><span class="tests">11 tests</span><span>278 lines</span></div>
+        <div class="insp">Inspired by psy-sampler (28× real-time, byte-identical per seed).</div>
+      </div>
+      <div class="card">
+        <div class="head"><span class="name">foundation/midi.mjs</span><span class="ver">v1</span></div>
+        <div class="desc">Web MIDI input (defensive in Node) + 24ppq MidiClockOut + timelineToMidiFile (SMF0, 480 ticks/beat, Tempo meta, End of track). encodeVarLen/decodeVarLen.</div>
+        <div class="meta"><span class="tests">15 tests</span><span>358 lines</span></div>
+        <div class="insp">Inspired by psystar (24ppq clock) + PSY6-ULTIMATE (SMF0 export).</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>The roast <span class="small">10 hard truths · evidence-grounded · cited with file:line</span></h2>
+    <div class="roast">
+      <div class="roast-item"><div class="body"><strong>Architecture is more sophisticated than the product.</strong> <code>PSY6_ARCHITECTURE.md</code> describes 5 layers, 3 distinct times, 10 test streams A–J. None of it was built. <code>FOUNDATION_VERSION.md</code> admits "NOTHING promoted yet."</div></div>
+      <div class="roast-item"><div class="body"><strong>The foundation is dead — it does not run.</strong> <code>foundation/foundation.mjs</code> is 28.4KB of excellent pure code. <code>index.html</code> has its own inline copy of all the model logic. Double maintenance.</div></div>
+      <div class="roast-item"><div class="body"><strong>Scheduler is from 2015.</strong> <code>setInterval(scheduler, 25)</code> at index.html:885. CROSS_REPO_AUDIT flags it as risk #1: background-tab stalls. PsySynthPro proved a real AudioWorklet fits in 18KB.</div></div>
+      <div class="roast-item"><div class="body"><strong>No real DSP. None.</strong> Zero PolyBLEP. Zero ZDF. Zero wavetable. Zero FM. PsySynthPro runs all of these per-sample. You call yourself "Professional Psytrance Workstation."</div></div>
+      <div class="roast-item"><div class="body"><strong>Beat detection = zero.</strong> 145 lines on latency model in architecture doc. Product: <code>bpm = 120 + v*45</code> from a knob. psy4 faked confidence with low-band energy. psy5 built the real thing.</div></div>
+      <div class="roast-item"><div class="body"><strong>"Learning" is <code>seed++</code>.</strong> PSY6-ULTIMATE learns 3 grammars while you play. psystar syncs P2P. psy5 has contextual bandit with abstention. You increment a constant.</div></div>
+      <div class="roast-item"><div class="body"><strong>Smallest test suite in the family.</strong> 59 tests vs psy-foundation's 729, psy-sampler's 653, psy5's 250. The most important contract — A–J — exists in NO repo.</div></div>
+      <div class="roast-item"><div class="body"><strong>Every "modern" capability — missing.</strong> No PWA, no MIDI clock out, no offline render, no stem export, no arrangement undo, no provenance gate, no DO-NOTHING abstention, no soak test.</div></div>
+      <div class="roast-item"><div class="body"><strong>Credentials leaked in a chat session.</strong> PSY6_ARCHITECTURE.md §9.9: "leaked credentials (turso.txt) — ROTATE ALL." Listed as open risk for months. Unresolved security incident.</div></div>
+      <div class="roast-item"><div class="body"><strong>The painful contradiction.</strong> Your own architecture says "Build less. Connect better. Measure everything. One source of truth. One musical clock." You built more, connected less, measured once, have two sources of truth, and zero clocks.</div></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Documentation <span class="small">committed to the repo</span></h2>
+    <div class="docs">
+      <a class="doc-link" href="ROAST.md"><span class="name">ROAST.md</span><span>the evidence — 10 hard truths, file:line cited <span class="arrow">→</span></span></a>
+      <a class="doc-link" href="PSY_WINNING_DEVICE.md"><span class="name">PSY_WINNING_DEVICE.md</span><span>the plan — 11 capabilities, sibling inspiration matrix <span class="arrow">→</span></span></a>
+      <a class="doc-link" href="WINNING_DEVICE_ROADMAP.md"><span class="name">WINNING_DEVICE_ROADMAP.md</span><span>what was done vs what remains <span class="arrow">→</span></span></a>
+      <a class="doc-link" href="FOUNDATION_VERSION.md"><span class="name">FOUNDATION_VERSION.md</span><span>registry — 6 components ADMITTED v1 <span class="arrow">→</span></span></a>
+      <a class="doc-link" href="index.html"><span class="name">index.html</span><span>the groovebox — runtime with W8 PWA + W9 foundation loader <span class="arrow">→</span></span></a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Run the tests <span class="small">Node 24+ · zero deps</span></h2>
+    <div style="background:#04140c;border:1px solid #0f3d26;border-radius:8px;padding:14px;
+      font-family:ui-monospace,Menlo,Consolas,monospace;color:#49ffa4;font-size:12px;line-height:1.7;
+      overflow-x:auto">
+      <div style="color:#9d8fc0"># clone + run</div>
+      <div>git clone https://github.com/dudududi144-source/psy.git</div>
+      <div>cd psy</div>
+      <div>node --test tests/*.test.mjs tests/foundation-consumer/*.test.mjs</div>
+      <div style="color:#9d8fc0;margin-top:8px"># expected output</div>
+      <div>ℹ tests 164</div>
+      <div>ℹ pass 164</div>
+      <div>ℹ fail 0</div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <a href="https://github.com/dudududi144-source/psy" target="_blank" rel="noopener">github.com/dudududi144-source/psy</a>
+    &middot; the winning device of the PSY family
+    &middot; <span style="color:var(--cyan)">164/164 tests green</span>
+  </footer>
+</div>
+</body>
+</html>

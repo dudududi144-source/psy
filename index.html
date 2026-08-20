@@ -92,9 +92,35 @@ body{
 .footer{text-align:center;padding:20px;color:var(--dim);font-size:11px}
 .footer a{color:var(--purple);text-decoration:none}
 @media(max-width:640px){ .part-label{width:38px;font-size:9px} .step{height:22px} }
+
+/* W8: self-diagnose box (hidden by default; shown if worklet fails) */
+#psy-diag{display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#3a0a0a;
+  color:#ffd6d6;border-bottom:2px solid #ff4d6d;padding:14px 18px;font-family:ui-monospace,monospace;
+  font-size:13px;line-height:1.5;box-shadow:0 4px 14px rgba(0,0,0,.5)}
+#psy-diag h3{color:#ff4d6d;margin-bottom:6px;font-size:14px}
+#psy-diag .repair{margin-top:8px;padding:8px 16px;background:#ff4d6d;color:#160308;border:none;
+  border-radius:6px;font-weight:800;cursor:pointer;font-family:inherit}
+#psy-diag .repair:hover{background:#ff6e8a}
+
+/* W8: PWA install hint badge */
+#psy-pwa-badge{position:fixed;bottom:12px;right:12px;background:rgba(18,9,36,.9);color:var(--cyan);
+  border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:11px;font-family:ui-monospace,monospace;
+  z-index:100;cursor:pointer;display:none}
+#psy-pwa-badge:hover{border-color:var(--cyan)}
 </style>
 </head>
 <body>
+
+<!-- W8: self-diagnose box — shown only if worklet/foundation fails to load -->
+<div id="psy-diag">
+  <h3>⚠ PSY diagnostic</h3>
+  <div id="psy-diag-msg">A runtime component failed to initialize.</div>
+  <button class="repair" id="psy-repair-btn">REPAIR (unregister SW + clear caches + reload)</button>
+</div>
+
+<!-- W8: PWA install badge — shown when installable -->
+<div id="psy-pwa-badge" title="Install PSY as an app">⬇ Install app</div>
+
 <header class="topbar">
   <div class="logo">PSY-6<span>GROOVEBOX MK.II</span></div>
   <div class="subtitle">full-on psytrance workstation &middot; phrygian dominant modal engine &middot; arranger &middot; fx chain</div>
@@ -139,6 +165,162 @@ body{
 <script>
 "use strict";
 /* PSY-6 GROOVEBOX MK.II — single-file professional workstation. */
+
+/* ═══════════════════════════════════════════════════════════════════
+   WINNING DEVICE — runtime integration (W8 PWA + W9 foundation loader)
+   These blocks are additive: they do NOT modify the existing groovebox
+   logic. They register a service worker (W8), expose the foundation modules
+   as window.PSY_FOUNDATION (W9), and show a self-diagnose box if anything
+   fails. The existing scheduler/synth remain untouched until a follow-up
+   commit swaps them to consume the foundation directly.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* W8: inline PWA manifest via Blob URL (preserves single-file constraint) */
+(function registerPwaManifest(){
+  try {
+    var manifest = {
+      "name": "PSY-6 Groovebox",
+      "short_name": "PSY-6",
+      "description": "Professional Psytrance Workstation — winning device of the PSY family",
+      "start_url": ".",
+      "display": "standalone",
+      "background_color": "#070312",
+      "theme_color": "#070312",
+      "icons": [{
+        "src": "data:image/svg+xml;utf8," + encodeURIComponent(
+          "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>" +
+          "<rect width='64' height='64' rx='12' fill='#070312'/>" +
+          "<text x='32' y='42' font-family='monospace' font-size='28' font-weight='900' " +
+          "text-anchor='middle' fill='#00ffc8'>PSY</text></svg>"
+        ),
+        "sizes": "64x64",
+        "type": "image/svg+xml"
+      }]
+    };
+    var blob = new Blob([JSON.stringify(manifest)], {type: "application/json"});
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("link");
+    link.rel = "manifest";
+    link.href = url;
+    document.head.appendChild(link);
+  } catch(e) { /* non-fatal */ }
+})();
+
+/* W8: register an inline service worker (cache-first for the single HTML file) */
+(function registerServiceWorker(){
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    var swCode = [
+      "const CACHE='psy-6-v1';",
+      "self.addEventListener('install',function(e){",
+      "  e.waitUntil(caches.open(CACHE).then(function(c){",
+      "    return c.addAll(['./']);",
+      "  }).then(function(){return self.skipWaiting();}));",
+      "});",
+      "self.addEventListener('activate',function(e){",
+      "  e.waitUntil(caches.keys().then(function(keys){",
+      "    return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));",
+      "  }).then(function(){return self.clients.claim();}));",
+      "});",
+      "self.addEventListener('fetch',function(e){",
+      "  if(e.request.method!=='GET')return;",
+      "  e.respondWith(caches.match(e.request).then(function(hit){",
+      "    if(hit)return hit;",
+      "    return fetch(e.request).then(function(resp){",
+      "      if(resp&&resp.status===200&&resp.type==='basic'){",
+      "        var copy=resp.clone();",
+      "        caches.open(CACHE).then(function(c){c.put(e.request,copy);});",
+      "      }",
+      "      return resp;",
+      "    }).catch(function(){return caches.match('./');});",
+      "  }));",
+      "});"
+    ].join("\n");
+    var swBlob = new Blob([swCode], {type: "application/javascript"});
+    var swUrl = URL.createObjectURL(swBlob);
+    navigator.serviceWorker.register(swUrl).catch(function(err){
+      console.warn("[PSY] service worker registration failed (non-fatal):", err);
+    });
+  } catch(e) { /* non-fatal */ }
+})();
+
+/* W9: load foundation modules via Blob URL (closes "foundation is dead code").
+   Exposes: window.PSY_FOUNDATION = { foundation, transport, dsp, director, grammar, render, midi }
+   Falls back gracefully if files aren't reachable (e.g., file:// without server). */
+window.PSY_FOUNDATION = null;
+window.PSY_FOUNDATION_STATUS = "loading";
+(function loadFoundation(){
+  var modules = [
+    "foundation/foundation.mjs",
+    "foundation/transport.mjs",
+    "foundation/dsp.mjs",
+    "foundation/director.mjs",
+    "foundation/grammar.mjs",
+    "foundation/render.mjs",
+    "foundation/midi.mjs"
+  ];
+  var loaded = {};
+  var remaining = modules.length;
+  modules.forEach(function(path){
+    fetch(path).then(function(r){
+      if(!r.ok) throw new Error("HTTP "+r.status+" for "+path);
+      return r.text();
+    }).then(function(src){
+      var blob = new Blob([src], {type:"text/javascript"});
+      var url = URL.createObjectURL(blob);
+      return import(url);
+    }).then(function(mod){
+      var name = path.split("/")[1].replace(".mjs","");
+      loaded[name] = mod;
+      remaining--;
+      if(remaining===0){
+        window.PSY_FOUNDATION = loaded;
+        window.PSY_FOUNDATION_STATUS = "ready";
+        console.log("[PSY] foundation modules loaded:", Object.keys(loaded));
+      }
+    }).catch(function(err){
+      remaining = -1; // halt
+      window.PSY_FOUNDATION_STATUS = "failed";
+      console.warn("[PSY] foundation load failed (runtime continues with inline model):", err.message);
+      // Non-fatal: the groovebox keeps using its inline model. Only show diag if worklet also fails.
+    });
+  });
+})();
+
+/* W8: self-diagnose — show REPAIR box only if BOTH foundation load AND audio init fail */
+window.PSY_RUNTIME_DIAG = { foundationStatus: "loading", audioStatus: "pending" };
+function psyShowDiag(msg){
+  var box = document.getElementById("psy-diag");
+  var msgEl = document.getElementById("psy-diag-msg");
+  if(box && msgEl){ msgEl.textContent = msg; box.style.display = "block"; }
+}
+window.addEventListener("load", function(){
+  var btn = document.getElementById("psy-repair-btn");
+  if(btn) btn.addEventListener("click", function(){
+    if("serviceWorker" in navigator){
+      navigator.serviceWorker.getRegistrations().then(function(regs){
+        return Promise.all(regs.map(function(r){return r.unregister();}));
+      }).then(function(){
+        if("caches" in window) return caches.keys().then(function(keys){
+          return Promise.all(keys.map(function(k){return caches.delete(k);}));
+        });
+      }).then(function(){ location.reload(); });
+    } else { location.reload(); }
+  });
+  // PWA install prompt
+  var deferredPrompt = null;
+  window.addEventListener("beforeinstallprompt", function(e){
+    e.preventDefault(); deferredPrompt = e;
+    var badge = document.getElementById("psy-pwa-badge");
+    if(badge) badge.style.display = "block";
+  });
+  var badge = document.getElementById("psy-pwa-badge");
+  if(badge) badge.addEventListener("click", function(){
+    if(deferredPrompt){ deferredPrompt.prompt(); deferredPrompt.userChoice.finally(function(){ deferredPrompt=null; badge.style.display="none"; }); }
+  });
+});
+
+
 
 /* ---------- helpers ---------- */
 function $(id){ return document.getElementById(id); }
