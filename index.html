@@ -1520,6 +1520,77 @@ Groovebox.prototype.setKnob=function(name,v){
   this.applyKnob(name);
   if(typeof renderKnob==="function") renderKnob(name);
 };
+/* ═══════════════════════════════════════════════════════════════════
+   P4 — AudioWorklet scheduler (replaces setInterval(25ms))
+   Closes CROSS_REPO_AUDIT.md risk #1: background-tab stalls.
+   The worklet runs in the audio thread (128-sample process() loop = ~2.9ms
+   at 44100Hz), NEVER throttled by background-tab timers. It posts "tick"
+   messages to the main thread, which runs the existing scheduler() logic
+   with the same 0.14s lookahead window. Falls back to setInterval if
+   AudioWorklet is unavailable (test sandbox, very old browsers).
+   ═══════════════════════════════════════════════════════════════════ */
+var PSY_WORKLET_AVAILABLE = (typeof AudioWorkletNode !== "undefined");
+var PSY_WORKLET_URL = null;
+if(PSY_WORKLET_AVAILABLE){
+  // PsySchedulerProcessor: tracks musical time sample-accurately.
+  // Posts "tick" every ~25ms (driven by process() blocks, not main-thread timer).
+  // Posts "beat" every 4 absSteps (so P3 transport can observe at precise audio times).
+  var workletCode = [
+    "class PsySchedulerProcessor extends AudioWorkletProcessor {",
+    "  constructor(opts){",
+    "    super();",
+    "    this.isPlaying = false;",
+    "    this.bpm = 145;",
+    "    this.absStep = 0;",
+    "    this.nextStepTime = 0; // audio time of next 16th-note step",
+    "    this.lastTickPost = 0;  // last time we posted a 'tick' message",
+    "    this.lastBeatPost = -1; // last absStep we posted a 'beat' for",
+    "    this.startOffset = 0;  // currentTime when play started",
+    "    this.port.onmessage = (e) => {",
+    "      var d = e.data;",
+    "      if(d.type === 'play'){",
+    "        this.isPlaying = true;",
+    "        this.bpm = d.bpm || 145;",
+    "        this.startOffset = currentTime;",
+    "        this.nextStepTime = currentTime + 0.06;",
+    "        this.absStep = 0;",
+    "        this.lastBeatPost = -1;",
+    "      } else if(d.type === 'stop'){",
+    "        this.isPlaying = false;",
+    "      } else if(d.type === 'setBpm'){",
+    "        this.bpm = d.bpm;",
+    "      }",
+    "    };",
+    "  }",
+    "  process(inputs, outputs){",
+    "    if(!this.isPlaying) return true;",
+    "    var stepDur = 60 / this.bpm / 4; // 16th-note duration in seconds",
+    "    // post 'tick' every ~25ms so main thread runs scheduler() with precise audio time",
+    "    if(currentTime - this.lastTickPost >= 0.025){",
+    "      this.lastTickPost = currentTime;",
+    "      this.port.postMessage({ type: 'tick', audioTime: currentTime, absStep: this.absStep });",
+    "    }",
+    "    // advance absStep for every step we've crossed since last process() block",
+    "    while(currentTime >= this.nextStepTime){",
+    "      // post 'beat' every 4 steps (quarter note)",
+    "      if(this.absStep % 4 === 0 && this.absStep !== this.lastBeatPost){",
+    "        this.lastBeatPost = this.absStep;",
+    "        this.port.postMessage({ type: 'beat', audioTime: this.nextStepTime, absStep: this.absStep, beatIndex: this.absStep / 4 });",
+    "      }",
+    "      this.nextStepTime += stepDur;",
+    "      this.absStep++;",
+    "    }",
+    "    return true;",
+    "  }",
+    "}",
+    "registerProcessor('psy-scheduler-processor', PsySchedulerProcessor);"
+  ].join("\n");
+  try {
+    var blob = new Blob([workletCode], {type:"application/javascript"});
+    PSY_WORKLET_URL = URL.createObjectURL(blob);
+  } catch(e){ PSY_WORKLET_AVAILABLE = false; }
+}
+
 Groovebox.prototype.play=function(){
   var self=this;
   return this.init().then(function(){
@@ -1529,11 +1600,64 @@ Groovebox.prototype.play=function(){
     self._barCacheKey=-1; self._lastSecIdx=-1;
     self.nextNoteTime=self.ctx.currentTime+0.06;
     self.updateDelayTime();
-    self.timerId=setInterval(function(){ self.scheduler(); },25);
+    // P4: prefer AudioWorklet scheduler; fall back to setInterval if unavailable
+    if(PSY_WORKLET_AVAILABLE && self.ctx && self.ctx.audioWorklet){
+      self._workletReady = false;
+      self.ctx.audioWorklet.addModule(PSY_WORKLET_URL).then(function(){
+        if(!self.isPlaying) return; // user stopped before worklet loaded
+        self._workletNode = new AudioWorkletNode(self.ctx, "psy-scheduler-processor");
+        // connect to a silent gain so the worklet actually runs (audio thread needs a destination)
+        var silent = self.ctx.createGain();
+        silent.gain.value = 0;
+        self._workletNode.connect(silent);
+        silent.connect(self.ctx.destination);
+        self._workletSilentGain = silent;
+        // message handler: tick → run scheduler(); beat → observe transport
+        self._workletNode.port.onmessage = function(e){
+          var msg = e.data;
+          if(msg.type === "tick"){
+            // run the existing scheduler loop (schedules events 0.14s ahead)
+            try { self.scheduler(); } catch(err){ /* swallow to keep worklet alive */ }
+          } else if(msg.type === "beat"){
+            // observe self-beat on P3 transport for PLL locking
+            if(window.PSY_P3 && window.PSY_P3.transport){
+              window.PSY_P3.transport.observe({
+                audioTime: msg.audioTime,
+                detectedAtAudioTime: msg.audioTime,
+                confidence: 0.9, // high-confidence: sample-accurate self-beat
+                source: "engine"
+              });
+            }
+            // update absStep from the worklet's authoritative count
+            self.absStep = msg.absStep;
+          }
+        };
+        // start the worklet
+        self._workletNode.port.postMessage({ type: "play", bpm: self.bpm });
+        self._workletReady = true;
+        console.log("[PSY P4] AudioWorklet scheduler started (replaces setInterval)");
+      }).catch(function(err){
+        console.warn("[PSY P4] worklet init failed, falling back to setInterval:", err.message);
+        PSY_WORKLET_AVAILABLE = false;
+        self.timerId = setInterval(function(){ self.scheduler(); }, 25);
+      });
+    } else {
+      // fallback: setInterval (throttled in background tabs — risk #1 remains)
+      self.timerId = setInterval(function(){ self.scheduler(); }, 25);
+    }
   });
 };
 Groovebox.prototype.stop=function(){
   this.isPlaying=false;
+  if(this._workletNode){
+    try {
+      this._workletNode.port.postMessage({ type: "stop" });
+      this._workletNode.disconnect();
+      if(this._workletSilentGain){ this._workletSilentGain.disconnect(); this._workletSilentGain = null; }
+      this._workletNode = null;
+    } catch(e){ /* already cleaned up */ }
+    this._workletReady = false;
+  }
   if(this.timerId){ clearInterval(this.timerId); this.timerId=null; }
 };
 Groovebox.prototype.scheduler=function(){
