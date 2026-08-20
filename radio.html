@@ -607,9 +607,7 @@ function setupControls(){
 
 /* ═══════ start ═══════ */
 function start(){
-  AUDIO = new (window.AudioContext || window.webkitAudioContext)();
-  // CRITICAL: resume the context (browsers start it suspended until user gesture)
-  if(AUDIO.state === "suspended"){ AUDIO.resume(); }
+  // AUDIO is created in the click handler (user gesture) — just use it here
   MASTER = AUDIO.createGain();
   MASTER.gain.value = 0.7;
   MASTER.connect(AUDIO.destination);
@@ -675,7 +673,21 @@ loadFoundation().then(function(loaded){
   setStatus("foundation ready — " + Object.keys(F).length + " modules · click to start", true);
   document.getElementById("start").addEventListener("click", function(){
     if(!F){ setStatus("foundation not ready yet", false); return; }
-    start();
+    // CRITICAL: resume must happen INSIDE the click handler (user gesture)
+    if(!AUDIO){
+      AUDIO = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if(AUDIO.state === "suspended"){
+      AUDIO.resume().then(function(){
+        console.log("[PSY RADIO] AudioContext resumed, state:", AUDIO.state);
+        start();
+      }).catch(function(err){
+        console.error("[PSY RADIO] resume failed:", err);
+        setStatus("audio resume failed: " + err.message, false);
+      });
+    } else {
+      start();
+    }
   });
 }).catch(function(err){
   setStatus("foundation load failed: " + err.message, false);
