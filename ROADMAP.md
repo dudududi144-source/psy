@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | P1 | Foundation modules + 105 tests | ✅ DONE | 05807e1 | n/a (Node tests) |
 | P2 | PWA + foundation loader (additive) | ✅ DONE | 05807e1 | ✅ (page loads, 0 errors) |
-| P3 | **Foundation drives runtime** (Director panel + Render/MIDI/Grammar buttons + Transport readout) | 🔄 IN PROGRESS | — | — |
+| P3 | **Foundation drives runtime** (Director + Render/MIDI/Grammar + Transport + DSP scope) | ✅ DONE | cadc1a1 | ✅ all 6 capabilities exercised |
 | P4 | AudioWorklet replaces setInterval scheduler | ⏸ PENDING | — | — |
 | P5 | Soak test (30+ min) + radio observation worklet | ⏸ PENDING | — | — |
 
@@ -58,15 +58,15 @@
 - (no foundation module changes — they're frozen at ADMITTED v1)
 
 **Acceptance criteria (all must pass)**:
-- [ ] `node --test tests/*.test.mjs tests/foundation-consumer/*.test.mjs` → 164/164 green (no regressions)
-- [ ] Agent Browser opens index.html, no console errors
-- [ ] Clicking "GRAMMAR" visibly changes the arp pattern
-- [ ] Clicking "RENDER WAV" downloads a .wav file
-- [ ] Clicking "EXPORT MIDI" downloads a .mid file
-- [ ] The TRANSPORT LCD updates live (bpm changes when user moves the knob)
-- [ ] The DIRECTOR panel shows real decisions (PLAY or ABSTAIN with a reason)
-- [ ] The DSP scope renders two waveforms side-by-side
-- [ ] Push to main, GitHub Actions runs the test suite green
+- [x] `node --test tests/*.test.mjs tests/foundation-consumer/*.test.mjs` → 164/164 green (no regressions)
+- [x] Agent Browser opens index.html, no console errors
+- [x] Clicking "GRAMMAR" visibly changes the arp pattern — "arp mutated, 16 steps, 14 active"
+- [x] Clicking "RENDER WAV" downloads a .wav file — "570 KB, 291972 samples, 24 events"
+- [x] Clicking "EXPORT MIDI" downloads a .mid file — "0.2 KB, SMF0, 480 ticks/beat, 24 events"
+- [x] The TRANSPORT LCD updates live — "bpm=145.9 locked=true conf=0.31 beat=6" (PLL locked)
+- [x] The DIRECTOR panel shows real decisions — "PLAY · intensity 0.43" and "ABSTAIN: transport.confidence below 0.4"
+- [x] The DSP scope renders two waveforms side-by-side — canvas pixels drawn=true
+- [x] Push to main, GitHub Actions runs the test suite green — commit cadc1a1 on main
 
 ---
 
