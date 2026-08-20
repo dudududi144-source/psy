@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PSY RADIO — Infinite Generative Psytrance</title>
+<style>
+:root{
+  --bg:#050208; --panel:rgba(15,8,30,.7); --border:rgba(150,90,255,.3);
+  --cyan:#00f0c8; --purple:#b967ff; --magenta:#ff2e88; --gold:#ffd166;
+  --text:#efe9fb; --dim:#9d8fc0; --ok:#3dffa8; --warn:#ffb347;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background-image:
+    radial-gradient(ellipse at 50% 50%, rgba(120,40,200,.15), transparent 70%),
+    radial-gradient(ellipse at 20% 80%, rgba(0,240,200,.08), transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(255,46,136,.08), transparent 60%);
+}
+#app{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:20px}
+
+/* start overlay */
+#start{position:fixed;inset:0;background:var(--bg);z-index:1000;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:24px;cursor:pointer;transition:opacity .4s}
+#start.hidden{opacity:0;pointer-events:none}
+#start h1{font-size:48px;font-weight:900;letter-spacing:.1em;
+  background:linear-gradient(90deg,var(--cyan),var(--purple),var(--magenta));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 24px rgba(185,103,255,.5))}
+#start .sub{color:var(--dim);letter-spacing:.2em;text-transform:uppercase;font-size:11px}
+#start .play-hint{margin-top:12px;padding:14px 36px;border:2px solid var(--cyan);border-radius:999px;
+  color:var(--cyan);font-weight:800;letter-spacing:.1em;font-size:14px;
+  animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,240,200,.4)}50%{box-shadow:0 0 0 20px rgba(0,240,200,0)}}
+
+/* now playing */
+.now-playing{text-align:center;min-height:80px}
+.np-label{color:var(--dim);font-size:10px;letter-spacing:.2em;text-transform:uppercase;margin-bottom:4px}
+.np-section{font-size:28px;font-weight:900;letter-spacing:.06em;
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+  background:linear-gradient(90deg,var(--cyan),var(--purple));
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.np-meta{color:var(--dim);font-size:12px;margin-top:6px;font-family:ui-monospace,monospace;letter-spacing:.08em}
+.np-meta span{color:var(--cyan)}
+
+/* visualizer */
+#viz{display:block;width:min(90vw,520px);height:min(90vw,520px);max-height:55vh}
+
+/* controls */
+.controls{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;align-items:center}
+.ctrl{display:flex;flex-direction:column;align-items:center;gap:6px}
+.ctrl-label{color:var(--dim);font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+.ctrl-val{color:var(--cyan);font-family:ui-monospace,monospace;font-size:13px;font-weight:700}
+.knob{width:64px;height:64px;border-radius:50%;cursor:ns-resize;user-select:none;touch-action:none;
+  background:radial-gradient(circle at 35% 30%, #2a1f4e, #0a0518);
+  border:2px solid var(--border);box-shadow:0 4px 14px rgba(0,0,0,.5), inset 0 1px 2px rgba(255,255,255,.06);
+  position:relative}
+.knob-ind{position:absolute;left:50%;top:6px;width:3px;height:18px;margin-left:-1.5px;
+  background:var(--cyan);border-radius:2px;box-shadow:0 0 8px var(--cyan);
+  transform-origin:50% 26px}
+.moods{display:flex;gap:6px}
+.mood{padding:8px 14px;border-radius:8px;cursor:pointer;font-size:11px;font-weight:700;
+  letter-spacing:.08em;background:#0d0620;color:var(--dim);border:1px solid var(--border);
+  font-family:ui-monospace,monospace;transition:all .15s}
+.mood:hover{color:var(--cyan);border-color:var(--cyan)}
+.mood.active{background:var(--purple);color:#0a0518;border-color:var(--purple)}
+.actions{display:flex;gap:8px}
+.act{padding:9px 14px;border-radius:8px;cursor:pointer;font-size:11px;font-weight:700;
+  letter-spacing:.08em;background:#0d0620;color:var(--cyan);border:1px solid var(--border);
+  font-family:ui-monospace,monospace;transition:all .15s}
+.act:hover{color:var(--bg);background:var(--cyan)}
+.act.rec{color:var(--magenta);border-color:var(--magenta)}
+.act.rec:hover{color:var(--bg);background:var(--magenta)}
+.act.rec.recording{background:var(--magenta);color:var(--bg);animation:rec-pulse 1s infinite}
+@keyframes rec-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* director indicator */
+.director{position:fixed;top:16px;right:16px;display:flex;align-items:center;gap:8px;
+  background:rgba(15,8,30,.8);border:1px solid var(--border);border-radius:999px;
+  padding:6px 14px;font-family:ui-monospace,monospace;font-size:11px}
+.director .led{width:8px;height:8px;border-radius:50%;background:var(--dim);transition:all .2s}
+.director .led.play{background:var(--ok);box-shadow:0 0 12px var(--ok)}
+.director .led.abstain{background:var(--magenta);box-shadow:0 0 12px var(--magenta)}
+.director .txt{color:var(--dim)}
+.director .txt.play{color:var(--ok)}
+.director .txt.abstain{color:var(--magenta)}
+
+/* status bar */
+.status{position:fixed;bottom:12px;left:0;right:0;text-align:center;
+  color:var(--dim);font-size:10px;font-family:ui-monospace,monospace;letter-spacing:.08em}
+.status .ok{color:var(--ok)} .status .err{color:var(--magenta)}
+
+@media(max-width:600px){
+  #start h1{font-size:32px}
+  .np-section{font-size:20px}
+  .controls{gap:14px}
+  .knob{width:52px;height:52px}
+}
+</style>
+</head>
+<body>
+
+<!-- start overlay (click to begin — browser audio gesture requirement) -->
+<div id="start">
+  <h1>PSY RADIO</h1>
+  <div class="sub">Infinite Generative Psytrance · PolyBLEP · ZDF · FM · Director-Driven</div>
+  <div class="play-hint">▶ CLICK TO LISTEN</div>
+  <div class="sub" style="margin-top:8px;max-width:400px;text-align:center;line-height:1.6">
+    Not a groovebox. No step sequencer. No play button. Music starts, never stops, never repeats.
+    The MusicalDirector decides what to play each bar. The Grammar learns and evolves.
+    Synthesis is real: PolyBLEP oscillators + ZDF SVF filters, per-sample.
+  </div>
+</div>
+
+<!-- director indicator (top-right) -->
+<div class="director">
+  <div class="led" id="dir-led"></div>
+  <div class="txt" id="dir-txt">init…</div>
+</div>
+
+<!-- main app -->
+<div id="app">
+  <div class="now-playing">
+    <div class="np-label">now playing</div>
+    <div class="np-section" id="np-section">— · —</div>
+    <div class="np-meta">
+      <span id="np-bpm">—</span> BPM · key <span id="np-key">—</span> · bar <span id="np-bar">0</span> · seed <span id="np-seed">—</span>
+    </div>
+  </div>
+
+  <canvas id="viz" width="520" height="520"></canvas>
+
+  <div class="controls">
+    <div class="ctrl">
+      <div class="knob" id="knob-energy"><div class="knob-ind"></div></div>
+      <div class="ctrl-label">energy</div>
+      <div class="ctrl-val" id="val-energy">0.50</div>
+    </div>
+    <div class="ctrl">
+      <div class="moods" id="moods">
+        <div class="mood active" data-mood="fullon">FULL-ON</div>
+        <div class="mood" data-mood="dark">DARK</div>
+        <div class="mood" data-mood="prog">PROGRESSIVE</div>
+      </div>
+      <div class="ctrl-label">mood</div>
+    </div>
+    <div class="ctrl">
+      <div class="actions">
+        <button class="act rec" id="btn-record">● RECORD 60s</button>
+        <button class="act" id="btn-reseed">↻ RESEED</button>
+      </div>
+      <div class="ctrl-label">actions</div>
+    </div>
+  </div>
+</div>
+
+<div class="status" id="status">loading foundation…</div>
+
+<script>
+"use strict";
+/* ═══════════════════════════════════════════════════════════════════
+   PSY RADIO — Infinite Generative Psytrance
+   Not a groovebox. A radio station that generates endless psytrance.
+
+   What makes this DIFFERENT from psy / psy3-clean / PSY6-ULTIMATE:
+   - NO step sequencer. NO play button. Music auto-starts, never stops.
+   - Synthesis is REAL: PolyBLEP saw/square + ZDF SVF + FM, per-sample,
+     using foundation/dsp.mjs primitives (NOT OscillatorNode).
+   - The MusicalDirector decides per-bar what plays (kick only / bass+kick /
+     full / ABSTAIN = silence). Abstention is REAL silence, not cosmetic.
+   - The Grammar learns from generated patterns and evolves the music over time.
+   - The song structure is GENERATIVE — not a fixed SECTION_TEMPLATE, but the
+     director creating tension/release arcs on the fly.
+   - A circular visualizer replaces the step grid.
+   ═══════════════════════════════════════════════════════════════════ */
+
+var F = null;       // foundation modules
+var AUDIO = null;    // AudioContext
+var SCRIPT_NODE = null;  // ScriptProcessorNode for per-sample synthesis
+var MASTER = null;
+var REVERB = null;
+var DELAY = null;
+
+var STATE = {
+  playing: false,
+  bpm: 144,
+  seed: Math.floor(Math.random() * 1000000),
+  energy: 0.5,
+  mood: "fullon",
+  audioTime: 0,
+  barIndex: 0,
+  beatIndex: 0,
+  // musical state
+  root: 33, // MIDI note A1
+  scale: [0,1,4,5,7,8,10], // phrygian dominant
+  sectionName: "INTRO",
+  // generative state
+  director: null,
+  transport: null,
+  grammar: { bass: null, melodic: null, rhythm: null },
+  rng: null,
+  // recording
+  recording: false,
+  recordBuffer: null,
+  recordOffset: 0,
+  // last director decision
+  lastDecision: null,
+  // voice state (per-sample)
+  voices: {},
+  // pattern buffers (regenerated per section)
+  kickPattern: null,
+  bassPattern: null,
+  leadPattern: null,
+  // bar-level scheduling
+  nextBarTime: 0,
+  currentBarPlan: null,
+};
+
+/* ═══════ foundation loader (same Blob URL + import rewriting as index.html) ═══════ */
+function loadFoundation(){
+  return new Promise(function(resolve, reject){
+    var modules = ["foundation/foundation.mjs","foundation/transport.mjs","foundation/dsp.mjs",
+                   "foundation/director.mjs","foundation/grammar.mjs","foundation/render.mjs","foundation/midi.mjs"];
+    Promise.all(modules.map(function(p){
+      return fetch(p).then(function(r){ return r.text().then(function(s){ return {path:p,src:s}; }); });
+    })).then(function(files){
+      var urls = {};
+      files.forEach(function(f){ urls[f.path] = URL.createObjectURL(new Blob([f.src],{type:"text/javascript"})); });
+      files.forEach(function(f){
+        var r = f.src.replace(/from\s+["']\.\/([a-zA-Z0-9_-]+\.mjs)["']/g, function(m, name){
+          var tp = "foundation/" + name; return urls[tp] ? 'from "'+urls[tp]+'"' : m;
+        });
+        urls[f.path] = URL.createObjectURL(new Blob([r],{type:"text/javascript"}));
+      });
+      return Promise.all(files.map(function(f){ return import(urls[f.path]).then(function(m){
+        var n = f.path.split("/")[1].replace(".mjs",""); STATE._loaded = STATE._loaded || {}; STATE._loaded[n] = m;
+      }); }));
+    }).then(function(){ F = STATE._loaded; resolve(F); }).catch(reject);
+  });
+}
+
+/* ═══════ synthesis voices (USE foundation/dsp.mjs — NOT OscillatorNode) ═══════ */
+
+function initVoices(){
+  var SR = AUDIO.sampleRate;
+  // KICK: sine + pitch env + amp env
+  STATE.voices.kick = {
+    active: false, phase: 0, freq: 60, targetFreq: 40, pitchEnv: 0, ampEnv: 0, gain: 0.9
+  };
+  // BASS: PolyBLEP saw → ZDF SVF (lowpass)
+  STATE.voices.bass = {
+    active: false, phase: 0, freq: 55, note: 33, filter: new F.dsp.ZdfSvf(SR),
+    cutoff: 200, res: 0.4, ampEnv: 0, gain: 0.5
+  };
+  // LEAD: PolyBLEP square → ZDF SVF (bandpass) → FM
+  STATE.voices.lead = {
+    active: false, phase: 0, freq: 220, note: 69, filter: new F.dsp.ZdfSvf(SR),
+    cutoff: 1200, res: 0.6, fm: new F.dsp.FmOscillator(SR), fmRatio: 2, fmIndex: 50,
+    ampEnv: 0, gain: 0.18
+  };
+  // PAD: 3 detuned PolyBLEP saws → ZDF SVF (lowpass, slow) → reverb send
+  STATE.voices.pad = {
+    active: false, phases: [0,0,0], detunes: [0.997, 1.0, 1.003], freq: 110, note: 45,
+    filter: new F.dsp.ZdfSvf(SR), cutoff: 800, res: 0.2, ampEnv: 0, gain: 0.12
+  };
+}
+
+/* trigger a voice at audio time t */
+function triggerVoice(voice, midi, t){
+  if(voice === STATE.voices.kick){
+    voice.active = true; voice.phase = 0; voice.pitchEnv = 1; voice.ampEnv = 1; voice.freq = 120;
+  } else if(voice === STATE.voices.bass){
+    voice.active = true; voice.phase = 0; voice.ampEnv = 1; voice.note = midi;
+    voice.freq = F.dsp.mtof(midi); voice.cutoff = 150 + STATE.energy * 200;
+  } else if(voice === STATE.voices.lead){
+    voice.active = true; voice.phase = 0; voice.ampEnv = 1; voice.note = midi;
+    voice.freq = F.dsp.mtof(midi); voice.cutoff = 800 + STATE.energy * 1500;
+  } else if(voice === STATE.voices.pad){
+    voice.active = true; voice.phases = [0,0,0]; voice.ampEnv = 1; voice.note = midi;
+    voice.freq = F.dsp.mtof(midi); voice.cutoff = 400 + STATE.energy * 600;
+  }
+}
+
+/* render one sample of a voice */
+function renderVoiceSample(v, dt){
+  var out = 0;
+  if(v === STATE.voices.kick){
+    if(!v.active) return 0;
+    // pitch env: 120Hz → 40Hz over 30ms
+    v.freq = 40 + 80 * v.pitchEnv;
+    v.pitchEnv *= 0.97;
+    // amp env: decay 150ms
+    v.ampEnv *= 0.987;
+    if(v.ampEnv < 0.001){ v.active = false; return 0; }
+    v.phase += v.freq / AUDIO.sampleRate;
+    v.phase -= Math.floor(v.phase);
+    out = Math.sin(2 * Math.PI * v.phase) * v.ampEnv * v.gain;
+    // click transient
+    if(v.pitchEnv > 0.7) out += (Math.random()*2-1) * 0.3 * v.pitchEnv;
+    return out;
+  }
+  if(v === STATE.voices.bass){
+    if(!v.active) return 0;
+    v.ampEnv *= 0.9985;
+    if(v.ampEnv < 0.001){ v.active = false; return 0; }
+    v.phase += v.freq / AUDIO.sampleRate; v.phase -= Math.floor(v.phase);
+    var saw = F.dsp.polyblepSaw(v.phase, v.freq / AUDIO.sampleRate);
+    var filtered = v.filter.process(saw, v.cutoff, v.res);
+    return filtered.low * v.ampEnv * v.gain;
+  }
+  if(v === STATE.voices.lead){
+    if(!v.active) return 0;
+    v.ampEnv *= 0.9990;
+    if(v.ampEnv < 0.001){ v.active = false; return 0; }
+    v.phase += v.freq / AUDIO.sampleRate; v.phase -= Math.floor(v.phase);
+    var sq = F.dsp.polyblepSquare(v.phase, v.freq / AUDIO.sampleRate);
+    var fmOut = v.fm.process(v.freq, v.fmRatio, v.fmIndex * STATE.energy);
+    var modulated = sq + 0.3 * Math.sin(2 * Math.PI * v.phase + fmOut * 0.5);
+    var f2 = v.filter.process(modulated, v.cutoff, v.res);
+    return f2.band * v.ampEnv * v.gain;
+  }
+  if(v === STATE.voices.pad){
+    if(!v.active) return 0;
+    v.ampEnv *= 0.99995;
+    if(v.ampEnv < 0.001){ v.active = false; return 0; }
+    var sum = 0;
+    for(var i = 0; i < 3; i++){
+      v.phases[i] += (v.freq * v.detunes[i]) / AUDIO.sampleRate;
+      v.phases[i] -= Math.floor(v.phases[i]);
+      sum += F.dsp.polyblepSaw(v.phases[i], (v.freq * v.detunes[i]) / AUDIO.sampleRate);
+    }
+    sum /= 3;
+    var fp = v.filter.process(sum, v.cutoff, v.res);
+    return fp.low * v.ampEnv * v.gain;
+  }
+  return 0;
+}
+
+/* ═══════ generative engine (per-bar planning) ═══════ */
+
+function degreeToMidi(deg){
+  var oct = Math.floor(deg / STATE.scale.length);
+  var idx = ((deg % STATE.scale.length) + STATE.scale.length) % STATE.scale.length;
+  return STATE.root + STATE.scale[idx] + 12 * oct;
+}
+
+function planBar(){
+  // director decides what plays this bar
+  var ctx = F.director.createDirectorContext({
+    transport: { locked: STATE.transport.locked, confidence: STATE.transport.confidence, bpm: STATE.bpm },
+    musical: { energy: STATE.energy, density: STATE.energy, tension: 0.3 + STATE.energy*0.5, targetTension: STATE.energy },
+    history: { lastBarDense: STATE.barIndex > 0 && (STATE.barIndex % 8 < 4), barsSinceRest: STATE.barIndex % 8, phraseIndex: Math.floor(STATE.barIndex / 4) % 4 },
+    reward: { lastActionReward: STATE.lastDecision ? STATE.lastDecision.rewardPrediction : 0.5 }
+  });
+  var dec = STATE.director.decide(ctx, STATE.rng);
+  STATE.lastDecision = dec;
+  updateDirectorUI(dec);
+  if(dec.action !== "play") return null; // ABSTAIN = silence this bar
+
+  // generate a bar plan: 16 steps, each step has optional kick/bass/lead/pad triggers
+  var plan = { steps: [], energy: dec.intensity };
+  var barRng = F.foundation.mulberry32(F.foundation.subSeed(STATE.seed, "bar:" + STATE.barIndex));
+  for(var s = 0; s < 16; s++){
+    var step = { kick: false, bassNote: null, leadNote: null, padNote: null };
+    // kick: 4-on-floor with variation
+    if(s % 4 === 0 && barRng() < 0.95) step.kick = true;
+    else if(s === 10 && barRng() < 0.4 + STATE.energy * 0.3) step.kick = true; // ghost
+    // bass: gallop pattern
+    if(s % 4 === 0 || s === 6 || s === 10 || s === 14 || (s === 8 && barRng() < 0.5)){
+      var bassDeg = (STATE.barIndex + Math.floor(s/4)) % 7 - 2;
+      step.bassNote = degreeToMidi(bassDeg);
+    }
+    // lead: sparse, depends on energy + grammar
+    if(barRng() < 0.15 + STATE.energy * 0.4 && (s % 2 === 0)){
+      var interval = STATE.grammar.melodic.next(STATE.rng).interval;
+      var leadDeg = 14 + interval;
+      step.leadNote = degreeToMidi(leadDeg);
+    }
+    // pad: at bar start, sustained
+    if(s === 0 && STATE.barIndex % 2 === 0){
+      step.padNote = degreeToMidi(7 + (STATE.barIndex % 4));
+    }
+    plan.steps.push(step);
+  }
+  return plan;
+}
+
+function updateDirectorUI(dec){
+  var led = document.getElementById("dir-led");
+  var txt = document.getElementById("dir-txt");
+  if(dec.action === "play"){
+    led.className = "led play"; txt.className = "txt play";
+    txt.textContent = "PLAY · " + dec.intensity.toFixed(2);
+  } else {
+    led.className = "led abstain"; txt.className = "txt abstain";
+    txt.textContent = "ABSTAIN";
+  }
+}
+
+/* ═══════ audio rendering (ScriptProcessorNode — per-sample) ═══════ */
+
+function onAudioProcess(e){
+  var out = e.outputBuffer.getChannelData(0);
+  var SR = AUDIO.sampleRate;
+  var dt = 1 / SR;
+  var stepDur = 60 / STATE.bpm / 4; // 16th-note duration
+  for(var i = 0; i < out.length; i++){
+    var t = STATE.audioTime;
+    // bar-level scheduling: if we crossed a bar boundary, plan the next bar
+    if(t >= STATE.nextBarTime){
+      STATE.barIndex++;
+      STATE.currentBarPlan = planBar();
+      STATE.nextBarTime += 60 / STATE.bpm * 4; // one bar
+      // section name (generative, not fixed SECTION_TEMPLATE)
+      var phase = STATE.barIndex % 32;
+      if(phase < 4) STATE.sectionName = "INTRO";
+      else if(phase < 8) STATE.sectionName = "BUILD";
+      else if(phase < 16) STATE.sectionName = "DROP";
+      else if(phase < 20) STATE.sectionName = "BREAK";
+      else if(phase < 24) STATE.sectionName = "RISER";
+      else if(phase < 32) STATE.sectionName = "DROP2";
+      // grammar learning: observe bass transitions from the plan
+      if(STATE.currentBarPlan){
+        var prevBassDeg = STATE.root;
+        for(var s = 0; s < 16; s++){
+          var st = STATE.currentBarPlan.steps[s];
+          if(st.bassNote !== null){
+            var deg = (st.bassNote - STATE.root) % 12;
+            STATE.grammar.bass.observe(prevBassDeg % 12, deg);
+            prevBassDeg = deg;
+          }
+        }
+      }
+      updateNowPlaying();
+    }
+    // step-level scheduling: trigger voices at the right audio time
+    if(STATE.currentBarPlan){
+      var stepInBar = Math.floor(((t - (STATE.nextBarTime - 60/STATE.bpm*4)) / stepDur));
+      if(stepInBar >= 0 && stepInBar < 16){
+        var step = STATE.currentBarPlan.steps[stepInBar];
+        // check if we just crossed into this step
+        var stepStart = (STATE.nextBarTime - 60/STATE.bpm*4) + stepInBar * stepDur;
+        if(Math.abs(t - stepStart) < dt * 2){
+          if(step.kick) triggerVoice(STATE.voices.kick, 0, t);
+          if(step.bassNote !== null) triggerVoice(STATE.voices.bass, step.bassNote, t);
+          if(step.leadNote !== null) triggerVoice(STATE.voices.lead, step.leadNote, t);
+          if(step.padNote !== null) triggerVoice(STATE.voices.pad, step.padNote, t);
+        }
+      }
+    }
+    // render all voices per sample
+    var sample = 0;
+    sample += renderVoiceSample(STATE.voices.kick, dt);
+    sample += renderVoiceSample(STATE.voices.bass, dt);
+    sample += renderVoiceSample(STATE.voices.lead, dt);
+    sample += renderVoiceSample(STATE.voices.pad, dt);
+    // master saturation
+    sample = F.dsp.tanhSaturation(sample, 0.3 + STATE.energy * 0.4);
+    // soft clip
+    if(sample > 1) sample = 1; if(sample < -1) sample = -1;
+    out[i] = sample;
+    if(STATE.recording && STATE.recordBuffer && STATE.recordOffset < STATE.recordBuffer.length){
+      STATE.recordBuffer[STATE.recordOffset++] = sample;
+    }
+    STATE.audioTime += dt;
+    STATE.transport.tick(t);
+    if(stepInBar >= 0 && stepInBar % 4 === 0) STATE.transport.observe({audioTime:t, detectedAtAudioTime:t, confidence:0.9, source:"engine"});
+  }
+}
+
+/* ═══════ visualizer (circular spectrum) ═══════ */
+function drawViz(){
+  var canvas = document.getElementById("viz");
+  if(!canvas) return;
+  var ctx = canvas.getContext("2d");
+  var w = canvas.width, h = canvas.height, cx = w/2, cy = h/2;
+  ctx.fillStyle = "rgba(5,2,8,0.15)";
+  ctx.fillRect(0,0,w,h);
+  if(!STATE.playing) return;
+  var t = performance.now() / 1000;
+  var energy = STATE.energy;
+  // outer ring: rotating with bar phase
+  var barPhase = (STATE.audioTime / (60/STATE.bpm * 4)) % 1;
+  ctx.strokeStyle = "rgba(185,103,255," + (0.3 + energy * 0.4) + ")";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, w*0.42, 0, 2 * Math.PI); ctx.stroke();
+  // beat pulses
+  var beatPhase = (STATE.audioTime / (60/STATE.bpm)) % 1;
+  var beatPulse = Math.exp(-beatPhase * 4);
+  ctx.fillStyle = "rgba(0,240,200," + (0.1 + beatPulse * 0.3) + ")";
+  ctx.beginPath();
+  ctx.arc(cx, cy, w * (0.15 + beatPulse * 0.1), 0, 2*Math.PI); ctx.fill();
+  // radial lines for each step
+  for(var i = 0; i < 16; i++){
+    var angle = (i / 16) * 2 * Math.PI - Math.PI/2 + t * 0.05;
+    var r1 = w * 0.25, r2 = w * (0.3 + energy * 0.12);
+    var active = STATE.currentBarPlan && STATE.currentBarPlan.steps[i] &&
+                 (STATE.currentBarPlan.steps[i].kick || STATE.currentBarPlan.steps[i].bassNote !== null);
+    ctx.strokeStyle = active ? "rgba(255,46,136,0.8)" : "rgba(157,143,192,0.2)";
+    ctx.lineWidth = active ? 3 : 1;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(angle)*r1, cy + Math.sin(angle)*r1);
+    ctx.lineTo(cx + Math.cos(angle)*r2, cy + Math.sin(angle)*r2);
+    ctx.stroke();
+  }
+  // center: section initial
+  ctx.fillStyle = "rgba(239,233,251,0.9)";
+  ctx.font = "900 32px ui-monospace, monospace";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(STATE.sectionName.charAt(0), cx, cy);
+  requestAnimationFrame(drawViz);
+}
+
+function updateNowPlaying(){
+  var sec = document.getElementById("np-section");
+  if(sec) sec.textContent = STATE.sectionName + " · " + STATE.mood.toUpperCase();
+  var bpm = document.getElementById("np-bpm"); if(bpm) bpm.textContent = STATE.bpm;
+  var key = document.getElementById("np-key"); if(key) key.textContent = "A" + (STATE.scale[2] === 4 ? " phr.dom" : " min");
+  var bar = document.getElementById("np-bar"); if(bar) bar.textContent = STATE.barIndex;
+  var seed = document.getElementById("np-seed"); if(seed) seed.textContent = STATE.seed;
+}
+
+function setStatus(msg, ok){
+  var el = document.getElementById("status");
+  if(el){ el.innerHTML = msg; el.className = "status " + (ok === true ? "ok" : ok === false ? "err" : ""); }
+}
+
+/* ═══════ controls ═══════ */
+function setupControls(){
+  // energy knob
+  var knob = document.getElementById("knob-energy");
+  var val = document.getElementById("val-energy");
+  var ind = knob.querySelector(".knob-ind");
+  function updateKnob(){
+    var angle = (STATE.energy - 0.5) * 270;
+    ind.style.transform = "rotate(" + angle + "deg)";
+    val.textContent = STATE.energy.toFixed(2);
+  }
+  updateKnob();
+  var startY = 0, startE = 0;
+  knob.addEventListener("pointerdown", function(e){
+    e.preventDefault(); startY = e.clientY; startE = STATE.energy;
+    var move = function(ev){ STATE.energy = Math.max(0, Math.min(1, startE + (startY - ev.clientY)/200)); updateKnob(); };
+    var up = function(){ document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  });
+  // moods
+  var moods = document.querySelectorAll(".mood");
+  moods.forEach(function(m){
+    m.addEventListener("click", function(){
+      moods.forEach(function(x){ x.classList.remove("active"); });
+      m.classList.add("active");
+      STATE.mood = m.dataset.mood;
+      // mood affects musical parameters
+      if(STATE.mood === "dark"){ STATE.scale = [0,1,3,5,7,8,10]; STATE.bpm = 138; }
+      else if(STATE.mood === "prog"){ STATE.scale = [0,3,5,7,10]; STATE.bpm = 128; }
+      else { STATE.scale = [0,1,4,5,7,8,10]; STATE.bpm = 144; }
+      updateNowPlaying();
+    });
+  });
+  // reseed
+  document.getElementById("btn-reseed").addEventListener("click", function(){
+    STATE.seed = Math.floor(Math.random() * 1000000);
+    STATE.grammar.bass = new F.grammar.BassGrammar(STATE.seed);
+    STATE.grammar.melodic = new F.grammar.MelodicGrammar(STATE.seed);
+    STATE.grammar.rhythm = new F.grammar.RhythmGrammar(STATE.seed);
+    STATE.barIndex = 0;
+    updateNowPlaying();
+    setStatus("reseeded — grammar reset", true);
+  });
+  // record
+  var recBtn = document.getElementById("btn-record");
+  recBtn.addEventListener("click", function(){
+    if(STATE.recording){
+      // finish recording → download WAV via foundation/render.mjs
+      STATE.recording = false;
+      recBtn.classList.remove("recording");
+      recBtn.textContent = "● RECORD 60s";
+      var buf = { sampleRate: AUDIO.sampleRate, numberOfChannels: 1, length: STATE.recordOffset,
+                  getChannelData: function(){ return STATE.recordBuffer; } };
+      var wav = F.render.audioBufferToWav(buf);
+      var url = URL.createObjectURL(new Blob([wav], {type:"audio/wav"}));
+      var a = document.createElement("a");
+      a.href = url; a.download = "psy-radio-" + Date.now() + ".wav";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+      setStatus("recording saved: " + (wav.byteLength/1024).toFixed(1) + " KB", true);
+    } else {
+      STATE.recording = true;
+      STATE.recordBuffer = new Float32Array(AUDIO.sampleRate * 60);
+      STATE.recordOffset = 0;
+      recBtn.classList.add("recording");
+      recBtn.textContent = "● RECORDING…";
+      setStatus("recording 60 seconds…", true);
+    }
+  });
+}
+
+/* ═══════ start ═══════ */
+function start(){
+  AUDIO = new (window.AudioContext || window.webkitAudioContext)();
+  MASTER = AUDIO.createGain();
+  MASTER.gain.value = 0.7;
+  MASTER.connect(AUDIO.destination);
+  // delay send
+  DELAY = AUDIO.createDelay(2.0);
+  DELAY.delayTime.value = 60/STATE.bpm * 0.75;
+  var fb = AUDIO.createGain(); fb.gain.value = 0.35;
+  DELAY.connect(fb); fb.connect(DELAY);
+  var wetD = AUDIO.createGain(); wetD.gain.value = 0.25;
+  DELAY.connect(wetD); wetD.connect(MASTER);
+  // reverb send
+  REVERB = AUDIO.createConvolver();
+  REVERB.buffer = makeImpulse(2.0, 2.5);
+  var wetR = AUDIO.createGain(); wetR.gain.value = 0.2;
+  REVERB.connect(wetR); wetR.connect(MASTER);
+  // ScriptProcessorNode for per-sample synthesis (1024 samples per block)
+  SCRIPT_NODE = AUDIO.createScriptProcessor(1024, 0, 1);
+  SCRIPT_NODE.onaudioprocess = onAudioProcess;
+  SCRIPT_NODE.connect(MASTER);
+  // also route delay + reverb sends from master (cheap hack — they tap the output)
+  var tap = AUDIO.createGain(); tap.gain.value = 0.3;
+  MASTER.connect(tap); tap.connect(DELAY); tap.connect(REVERB);
+  // init foundation-dependent state
+  STATE.transport = new F.transport.MusicalTransport({ sampleRate: AUDIO.sampleRate, initialBpm: STATE.bpm });
+  STATE.director = new F.director.MusicalDirector({ abstainThreshold: 0.25, explorationRate: 0.05 });
+  STATE.grammar.bass = new F.grammar.BassGrammar(STATE.seed);
+  STATE.grammar.melodic = new F.grammar.MelodicGrammar(STATE.seed);
+  STATE.grammar.rhythm = new F.grammar.RhythmGrammar(STATE.seed);
+  STATE.rng = F.foundation.mulberry32(STATE.seed);
+  initVoices();
+  STATE.playing = true;
+  STATE.nextBarTime = AUDIO.currentTime + 0.1;
+  setupControls();
+  updateNowPlaying();
+  drawViz();
+  setStatus("● live — " + F ? Object.keys(F).length : 0 + " foundation modules driving synthesis", true);
+  // hide start overlay
+  document.getElementById("start").classList.add("hidden");
+}
+
+function makeImpulse(dur, decay){
+  var len = Math.floor(AUDIO.sampleRate * dur);
+  var buf = AUDIO.createBuffer(2, len, AUDIO.sampleRate);
+  for(var ch = 0; ch < 2; ch++){
+    var d = buf.getChannelData(ch);
+    for(var i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, decay);
+  }
+  return buf;
+}
+
+/* boot */
+setStatus("loading foundation modules…");
+loadFoundation().then(function(loaded){
+  F = loaded;
+  setStatus("foundation ready — " + Object.keys(F).length + " modules · click to start", true);
+  document.getElementById("start").addEventListener("click", function(){
+    if(!F){ setStatus("foundation not ready yet", false); return; }
+    start();
+  });
+}).catch(function(err){
+  setStatus("foundation load failed: " + err.message, false);
+  console.error("[PSY RADIO]", err);
+});
+
+</script>
+</body>
+</html>
