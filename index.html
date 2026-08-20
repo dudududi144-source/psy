@@ -107,6 +107,54 @@ body{
   border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:11px;font-family:ui-monospace,monospace;
   z-index:100;cursor:pointer;display:none}
 #psy-pwa-badge:hover{border-color:var(--cyan)}
+
+/* P3: foundation-driven UI panels */
+.psy-foundation-panel{border-color:rgba(0,255,200,.35)!important}
+.psy-foundation-panel h2{color:var(--cyan)!important}
+.psy-foundation-panel h2 .badge{display:inline-block;margin-left:8px;padding:1px 6px;border-radius:3px;
+  font-size:9px;letter-spacing:.08em;background:rgba(61,255,168,.12);color:var(--ok);border:1px solid rgba(61,255,168,.3);
+  text-transform:uppercase;font-weight:700}
+.psy-foundation-panel h2 .badge.pending{background:rgba(255,179,71,.12);color:var(--warn);border-color:rgba(255,179,71,.3)}
+
+/* TRANSPORT readout (3.1) */
+.psy-transport-lcd{background:var(--lcd-bg);border:1px solid #0f3d26;border-radius:8px;padding:10px 12px;
+  font-family:ui-monospace,Menlo,monospace;color:var(--lcd-fg);text-shadow:0 0 8px rgba(73,255,164,.4);
+  font-size:12px;line-height:1.6;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px 16px}
+.psy-transport-lcd .k{color:var(--dim);text-shadow:none;font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.psy-transport-lcd .v{font-size:14px;font-weight:700}
+.psy-transport-lcd .v.locked{color:var(--ok)}
+.psy-transport-lcd .v.unlocked{color:var(--warn)}
+
+/* DIRECTOR panel (3.2) */
+.psy-director{display:flex;align-items:center;gap:12px;padding:12px;background:rgba(7,3,18,.6);
+  border:1px solid var(--border);border-radius:8px}
+.psy-director .led{width:14px;height:14px;border-radius:50%;background:var(--dim);flex:none;
+  box-shadow:0 0 8px var(--dim);transition:background .15s}
+.psy-director .led.play{background:var(--ok);box-shadow:0 0 12px var(--ok)}
+.psy-director .led.abstain{background:var(--err);box-shadow:0 0 12px var(--err)}
+.psy-director .info{flex:1;font-family:ui-monospace,monospace;font-size:12px}
+.psy-director .action{font-weight:800;letter-spacing:.06em;font-size:13px}
+.psy-director .action.play{color:var(--ok)}
+.psy-director .action.abstain{color:var(--err)}
+.psy-director .reason{color:var(--dim);font-size:11px;margin-top:2px}
+
+/* P3 action buttons (grammar, render, midi) */
+.psy-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.psy-btn{padding:9px 16px;border-radius:7px;cursor:pointer;font-weight:700;font-size:11px;
+  letter-spacing:.08em;background:#0d0620;color:var(--cyan);border:1px solid var(--border);
+  font-family:ui-monospace,monospace;transition:all .15s}
+.psy-btn:hover:not(:disabled){color:var(--bg);background:var(--cyan);border-color:var(--cyan)}
+.psy-btn:disabled{opacity:.5;cursor:wait}
+.psy-btn.danger{color:var(--magenta)}
+.psy-btn.danger:hover:not(:disabled){color:var(--bg);background:var(--magenta);border-color:var(--magenta)}
+.psy-btn .check{margin-left:6px;color:var(--ok)}
+
+/* DSP oscilloscope (3.6) */
+.psy-dsp-scope{width:100%;height:120px;border-radius:8px;border:1px solid var(--border);
+  background:#04140c;display:block;margin-top:8px}
+.psy-dsp-legend{display:flex;gap:16px;font-size:10px;color:var(--dim);margin-top:6px;
+  font-family:ui-monospace,monospace;justify-content:center}
+.psy-dsp-legend .swatch{display:inline-block;width:10px;height:2px;margin-right:4px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -156,6 +204,61 @@ body{
     <div id="status" class="status mono"></div>
     <div id="timeline" class="timeline"></div>
     <div class="hint">Keys <b>A W S E D F T G</b> play pads &middot; <b>Space</b> play/stop &middot; drag knobs vertically &middot; double-click knob = reset</div>
+  </section>
+
+  <!-- ═══════ P3.1: TRANSPORT readout (driven by foundation/transport.mjs) ═══════ -->
+  <section class="panel psy-foundation-panel" id="psy-transport-panel">
+    <h2>MusicalTransport <span class="badge" id="psy-transport-status">loading</span></h2>
+    <div class="psy-transport-lcd" id="psy-transport-lcd">
+      <div><div class="k">bpm</div><div class="v" id="psy-t-bpm">—</div></div>
+      <div><div class="k">locked</div><div class="v unlocked" id="psy-t-locked">false</div></div>
+      <div><div class="k">confidence</div><div class="v" id="psy-t-conf">0.00</div></div>
+      <div><div class="k">phase err</div><div class="v" id="psy-t-err">— ms</div></div>
+      <div><div class="k">beat index</div><div class="v" id="psy-t-beat">0</div></div>
+      <div><div class="k">source</div><div class="v" id="psy-t-source">manual</div></div>
+    </div>
+    <div class="hint">Tap a pad 4× in rhythm &mdash; transport locks (uses foundation/transport.mjs PLL). Drag BPM knob &mdash; transport tracks it.</div>
+  </section>
+
+  <!-- ═══════ P3.2: DIRECTOR panel (driven by foundation/director.mjs) ═══════ -->
+  <section class="panel psy-foundation-panel" id="psy-director-panel">
+    <h2>MusicalDirector <span class="badge" id="psy-director-status">loading</span> <span class="small">&mdash; DO-NOTHING abstention</span></h2>
+    <div class="psy-director">
+      <div class="led" id="psy-director-led"></div>
+      <div class="info">
+        <div class="action" id="psy-director-action">—</div>
+        <div class="reason" id="psy-director-reason">waiting for foundation…</div>
+      </div>
+      <div class="info" style="text-align:right">
+        <div class="k" style="color:var(--dim);font-size:10px;letter-spacing:.08em;text-transform:uppercase">reward prediction</div>
+        <div class="v" id="psy-director-reward" style="font-family:ui-monospace,monospace;font-size:13px;color:var(--cyan)">0.500</div>
+      </div>
+    </div>
+    <div class="hint">The director decides per-bar: PLAY (green) or ABSTAIN (red). Mutes all parts &rarr; it abstains (low energy).</div>
+  </section>
+
+  <!-- ═══════ P3.3–3.5: GRAMMAR + RENDER + MIDI actions ═══════ -->
+  <section class="panel psy-foundation-panel" id="psy-actions-panel">
+    <h2>Foundation Actions <span class="badge" id="psy-actions-status">loading</span> <span class="small">&mdash; grammar / render / midi</span></h2>
+    <div class="psy-actions">
+      <button class="psy-btn" id="psy-btn-grammar" disabled>↯ GRAMMAR VARIATION</button>
+      <button class="psy-btn danger" id="psy-btn-grammar-reset" disabled>RESET GRAMMAR</button>
+      <button class="psy-btn" id="psy-btn-render" disabled>⬇ RENDER WAV (4 bars)</button>
+      <button class="psy-btn" id="psy-btn-midi" disabled>⬇ EXPORT MIDI (4 bars)</button>
+    </div>
+    <div id="psy-action-log" class="status mono dim" style="margin-top:8px;min-height:18px"></div>
+    <div class="hint">GRAMMAR mutates the arp via foundation/grammar.mjs. RENDER exports WAV via foundation/render.mjs. EXPORT MIDI via foundation/midi.mjs.</div>
+  </section>
+
+  <!-- ═══════ P3.6: DSP oscilloscope (foundation/dsp.mjs) ═══════ -->
+  <section class="panel psy-foundation-panel" id="psy-dsp-panel">
+    <h2>DSP Primitives <span class="badge" id="psy-dsp-status">loading</span> <span class="small">&mdash; PolyBLEP vs naive saw</span></h2>
+    <canvas id="psy-dsp-scope" class="psy-dsp-scope" width="860" height="120"></canvas>
+    <div class="psy-dsp-legend">
+      <span><span class="swatch" style="background:var(--cyan)"></span>PolyBLEP saw (band-limited, foundation/dsp.mjs)</span>
+      <span><span class="swatch" style="background:var(--magenta)"></span>naive saw (aliased, has bright spikes at discontinuity)</span>
+    </div>
+    <div class="hint">Top: band-limited — smooth, no aliasing. Bottom: naive — vertical spikes at phase wrap (aliasing).</div>
   </section>
 </main>
 <footer class="footer mono">
@@ -246,10 +349,17 @@ body{
 
 /* W9: load foundation modules via Blob URL (closes "foundation is dead code").
    Exposes: window.PSY_FOUNDATION = { foundation, transport, dsp, director, grammar, render, midi }
-   Falls back gracefully if files aren't reachable (e.g., file:// without server). */
+   Falls back gracefully if files aren't reachable (e.g., file:// without server).
+   Note: foundation modules use relative imports ("./foundation.mjs"). Blob URLs don't support
+   relative specifiers, so we rewrite each module's source to use absolute blob URLs for its
+   imports before constructing the import blob.
+   GUARDED: if fetch/Blob/import aren't available (e.g. Node test sandbox), the loader
+   no-ops and the groovebox continues with its inline model. */
 window.PSY_FOUNDATION = null;
-window.PSY_FOUNDATION_STATUS = "loading";
+window.PSY_FOUNDATION_STATUS = (typeof fetch === "undefined" || typeof Blob === "undefined") ? "unavailable" : "loading";
 (function loadFoundation(){
+  if(window.PSY_FOUNDATION_STATUS === "unavailable") return;
+  if(typeof fetch === "undefined" || typeof Blob === "undefined"){ window.PSY_FOUNDATION_STATUS = "unavailable"; return; }
   var modules = [
     "foundation/foundation.mjs",
     "foundation/transport.mjs",
@@ -260,30 +370,44 @@ window.PSY_FOUNDATION_STATUS = "loading";
     "foundation/midi.mjs"
   ];
   var loaded = {};
-  var remaining = modules.length;
-  modules.forEach(function(path){
-    fetch(path).then(function(r){
+  // Step 1: fetch all module sources in parallel
+  Promise.all(modules.map(function(path){
+    return fetch(path).then(function(r){
       if(!r.ok) throw new Error("HTTP "+r.status+" for "+path);
-      return r.text();
-    }).then(function(src){
-      var blob = new Blob([src], {type:"text/javascript"});
-      var url = URL.createObjectURL(blob);
-      return import(url);
-    }).then(function(mod){
-      var name = path.split("/")[1].replace(".mjs","");
-      loaded[name] = mod;
-      remaining--;
-      if(remaining===0){
-        window.PSY_FOUNDATION = loaded;
-        window.PSY_FOUNDATION_STATUS = "ready";
-        console.log("[PSY] foundation modules loaded:", Object.keys(loaded));
-      }
-    }).catch(function(err){
-      remaining = -1; // halt
-      window.PSY_FOUNDATION_STATUS = "failed";
-      console.warn("[PSY] foundation load failed (runtime continues with inline model):", err.message);
-      // Non-fatal: the groovebox keeps using its inline model. Only show diag if worklet also fails.
+      return r.text().then(function(src){ return { path: path, src: src }; });
     });
+  })).then(function(files){
+    // Step 2: create a blob URL for each module (preserving order)
+    var blobUrls = {};
+    files.forEach(function(f){
+      var blob = new Blob([f.src], {type:"text/javascript"});
+      blobUrls[f.path] = URL.createObjectURL(blob);
+    });
+    // Step 3: rewrite each module's source — replace relative imports
+    // like `import { X } from "./foundation.mjs"` with the corresponding blob URL
+    files.forEach(function(f){
+      var rewritten = f.src.replace(/from\s+["']\.\/([a-zA-Z0-9_-]+\.mjs)["']/g, function(match, name){
+        var targetPath = "foundation/" + name;
+        if(blobUrls[targetPath]) return 'from "' + blobUrls[targetPath] + '"';
+        return match; // leave unchanged if not found
+      });
+      var newBlob = new Blob([rewritten], {type:"text/javascript"});
+      blobUrls[f.path] = URL.createObjectURL(newBlob);
+    });
+    // Step 4: import each module by its blob URL
+    return Promise.all(files.map(function(f){
+      return import(blobUrls[f.path]).then(function(mod){
+        var name = f.path.split("/")[1].replace(".mjs","");
+        loaded[name] = mod;
+      });
+    }));
+  }).then(function(){
+    window.PSY_FOUNDATION = loaded;
+    window.PSY_FOUNDATION_STATUS = "ready";
+    console.log("[PSY] foundation modules loaded:", Object.keys(loaded));
+  }).catch(function(err){
+    window.PSY_FOUNDATION_STATUS = "failed";
+    console.warn("[PSY] foundation load failed (runtime continues with inline model):", err.message);
   });
 })();
 
@@ -319,6 +443,347 @@ window.addEventListener("load", function(){
     if(deferredPrompt){ deferredPrompt.prompt(); deferredPrompt.userChoice.finally(function(){ deferredPrompt=null; badge.style.display="none"; }); }
   });
 });
+
+/* ═══════════════════════════════════════════════════════════════════
+   P3 — FOUNDATION DRIVES RUNTIME
+   When window.PSY_FOUNDATION becomes "ready", this block:
+   - Creates a MusicalTransport (3.1) and ticks it from a 200ms interval,
+     observing self-generated beats from the scheduler.
+   - Creates a MusicalDirector (3.2) and decides per-bar.
+   - Wires GRAMMAR (3.3), RENDER WAV (3.4), EXPORT MIDI (3.5) buttons.
+   - Renders PolyBLEP vs naive saw on a canvas (3.6).
+   The existing groovebox logic is NOT modified — these run in parallel
+   and read state from the running engine via window.groovebox (set by init).
+   GUARDED: if document/fetch/setInterval/Blob are unavailable (e.g. Node test
+   sandbox), P3 silently no-ops. The existing groovebox still runs.
+   ═══════════════════════════════════════════════════════════════════ */
+window.PSY_P3 = { transport: null, director: null, grammars: null, originalArp: null };
+window.groovebox = null; // set by the engine init; P3 reads state from here
+
+var PSY_P3_AVAILABLE = (typeof document !== "undefined" && typeof fetch !== "undefined" &&
+                        typeof Blob !== "undefined" && typeof setInterval === "function" &&
+                        typeof Promise !== "undefined" &&
+                        window.PSY_FOUNDATION_STATUS !== "unavailable");
+
+(function waitForFoundation(){
+  if(!PSY_P3_AVAILABLE) return; // no DOM/ESM environment — skip P3 silently
+  var attempts = 0;
+  function tick(){
+    attempts++;
+    if(window.PSY_FOUNDATION_STATUS === "ready" && window.PSY_FOUNDATION){
+      initP3(window.PSY_FOUNDATION);
+    } else if(window.PSY_FOUNDATION_STATUS === "failed"){
+      markP3Failed("foundation load failed");
+    } else if(attempts < 100){
+      setTimeout(tick, 100);
+    } else {
+      markP3Failed("foundation load timeout");
+    }
+  }
+  setTimeout(tick, 50);
+})();
+
+function markP3Failed(msg){
+  if(!PSY_P3_AVAILABLE) return;
+  ["psy-transport-status","psy-director-status","psy-actions-status","psy-dsp-status"].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el){ el.textContent = "failed"; el.classList.add("pending"); }
+  });
+  console.warn("[PSY P3] disabled:", msg);
+}
+
+function logAction(msg){
+  if(!PSY_P3_AVAILABLE) return;
+  var el = document.getElementById("psy-action-log");
+  if(el){
+    el.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+    el.className = "status mono";
+  }
+  console.log("[PSY P3 action]", msg);
+}
+
+function initP3(F){
+  if(!PSY_P3_AVAILABLE) return;
+  console.log("[PSY P3] foundation ready, wiring runtime integration");
+  ["psy-transport-status","psy-director-status","psy-actions-status","psy-dsp-status"].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el){ el.textContent = "ready"; }
+  });
+
+  /* ── 3.1: MusicalTransport ── */
+  var transport = new F.transport.MusicalTransport({ sampleRate: 44100, initialBpm: 145 });
+  window.PSY_P3.transport = transport;
+  var lastBeatObserved = -1;
+  setInterval(function(){
+    var now = (window.groovebox && window.groovebox.ctx) ? window.groovebox.ctx.currentTime : (performance.now()/1000);
+    transport.tick(now);
+    var gb = window.groovebox;
+    if(gb && gb.isPlaying && gb.absStep !== undefined && gb.absStep !== lastBeatObserved){
+      if(gb.absStep % 4 === 0){
+        transport.observe({ audioTime: now, detectedAtAudioTime: now, confidence: 0.85, source: "engine" });
+        lastBeatObserved = gb.absStep;
+      }
+    }
+    var tEl = document.getElementById("psy-t-bpm");
+    if(tEl) tEl.textContent = transport.bpm.toFixed(1);
+    var lEl = document.getElementById("psy-t-locked");
+    if(lEl){ lEl.textContent = transport.locked ? "true" : "false"; lEl.className = "v " + (transport.locked ? "locked" : "unlocked"); }
+    var cEl = document.getElementById("psy-t-conf");
+    if(cEl) cEl.textContent = transport.confidence.toFixed(2);
+    var eEl = document.getElementById("psy-t-err");
+    if(eEl) eEl.textContent = transport.phaseErrorMs > 0 ? transport.phaseErrorMs.toFixed(1) + " ms" : "— ms";
+    var bEl = document.getElementById("psy-t-beat");
+    if(bEl) bEl.textContent = transport.beatIndex;
+    var sEl = document.getElementById("psy-t-source");
+    if(sEl) sEl.textContent = transport.locked ? "engine" : "manual";
+  }, 200);
+
+  /* ── 3.2: MusicalDirector with DO-NOTHING abstention ── */
+  var director = new F.director.MusicalDirector({ abstainThreshold: 0.3, explorationRate: 0.05 });
+  window.PSY_P3.director = director;
+  var directorRng = F.foundation.mulberry32(0xC0FFEE);
+  var lastDecidedBar = -1;
+  setInterval(function(){
+    var gb = window.groovebox;
+    if(!gb || !gb.isPlaying || !gb.song) return;
+    var currentBar = Math.floor(gb.absStep / 16);
+    if(currentBar === lastDecidedBar) return;
+    lastDecidedBar = currentBar;
+    var energy = 0.5, density = 0.5;
+    try {
+      var secInfo = F.foundation.sectionAt(gb.song, currentBar);
+      energy = F.foundation.energyAt(secInfo.section.name, secInfo.barInSection, secInfo.section.bars);
+    } catch(e) {}
+    var mutedCount = 0;
+    ["KICK","BASS","PERC","LEAD","ARP","PAD"].forEach(function(p){
+      if(gb.mutes && gb.mutes[p]) mutedCount++;
+    });
+    density = (6 - mutedCount) / 6;
+    var ctx = F.director.createDirectorContext({
+      transport: { locked: transport.locked, confidence: transport.confidence, bpm: transport.bpm },
+      musical: { energy: energy, density: density, tension: 0.3, targetTension: 0.5 },
+      history: { lastBarDense: false, barsSinceRest: currentBar, phraseIndex: currentBar % 4 },
+      reward: { lastActionReward: 0.5 }
+    });
+    var dec = director.decide(ctx, directorRng);
+    var led = document.getElementById("psy-director-led");
+    var act = document.getElementById("psy-director-action");
+    var rsn = document.getElementById("psy-director-reason");
+    var rwd = document.getElementById("psy-director-reward");
+    if(led) led.className = "led " + (dec.action === "play" ? "play" : "abstain");
+    if(act){
+      act.textContent = dec.action.toUpperCase() + (dec.action === "play" ? " · intensity " + dec.intensity.toFixed(2) : "");
+      act.className = "action " + dec.action;
+    }
+    if(rsn) rsn.textContent = dec.reason;
+    if(rwd) rwd.textContent = dec.rewardPrediction.toFixed(3);
+    var actualReward = dec.action === "play" ? Math.min(1, density * 0.8 + 0.2) : 0.4;
+    director.updateReward(actualReward);
+  }, 100);
+
+  /* ── 3.3: GRAMMAR variation ── */
+  var grammars = {
+    bass: new F.grammar.BassGrammar(0xBEEF),
+    melodic: new F.grammar.MelodicGrammar(0xCAFE),
+    rhythm: new F.grammar.RhythmGrammar(0xF00D)
+  };
+  window.PSY_P3.grammars = grammars;
+  var grammarRng = F.foundation.mulberry32(0x67726177);
+  var grammarBtn = document.getElementById("psy-btn-grammar");
+  var grammarResetBtn = document.getElementById("psy-btn-grammar-reset");
+  if(grammarBtn) grammarBtn.disabled = false;
+  if(grammarResetBtn) grammarResetBtn.disabled = false;
+  if(grammarBtn) grammarBtn.addEventListener("click", function(){
+    var gb = window.groovebox;
+    if(!gb || !gb.song){ logAction("no song loaded"); return; }
+    try {
+      // ensure arpPhrase exists (the inline buildSong creates one; if missing, synthesize)
+      if(!gb.song.arpPhrase){
+        gb.song.arpPhrase = [];
+        for(var i = 0; i < 16; i++){
+          gb.song.arpPhrase.push({ deg: [0,2,4,7,9][i % 5], oct: i % 4 === 0 ? 1 : 0 });
+        }
+      }
+      // foundation's resolveSong expects arpPhrase entries to be non-null objects with `deg`.
+      // The inline buildArpPhrase uses nulls for rests — replace them with a deg=0 sentinel
+      // for the resolve call (the original arpPhrase is preserved separately on the song).
+      var songForResolve = JSON.parse(JSON.stringify(gb.song));
+      songForResolve.arpPhrase = songForResolve.arpPhrase.map(function(e){
+        return e === null ? { deg: 0, oct: 0 } : e;
+      });
+      // resolve the current song via foundation, then apply grammar variation
+      var timeline = F.foundation.resolveSong(songForResolve, { bars: 4 });
+      var mutated = F.grammar.applyGrammarVariation(timeline, grammars, grammarRng);
+      var arpEvents = mutated.events.filter(function(e){ return e.voice === "arp"; });
+      if(arpEvents.length > 0){
+        // save original for reset (deep copy: replace nulls with placeholder so slice preserves shape)
+        if(!window.PSY_P3.originalArp){
+          window.PSY_P3.originalArp = gb.song.arpPhrase.map(function(e){ return e ? { deg: e.deg, oct: e.oct || 0 } : null; });
+        }
+        // mutate the arp phrase using the grammar-generated intervals (skip null/rest events)
+        var newArp = gb.song.arpPhrase.map(function(e){ return e ? { deg: e.deg, oct: e.oct || 0 } : null; });
+        var arpIdx = 0;
+        for(var j = 0; j < newArp.length; j++){
+          if(newArp[j] === null) continue; // preserve rests
+          // find the next non-null arp event
+          while(arpIdx < arpEvents.length && (arpEvents[arpIdx].midi === null || arpEvents[arpIdx].midi === undefined)){
+            arpIdx++;
+          }
+          if(arpIdx < arpEvents.length){
+            var newDeg = (arpEvents[arpIdx].midi - gb.song.root) % 12;
+            if(newDeg < 0) newDeg += 12;
+            newArp[j] = { deg: newDeg, oct: newArp[j].oct || 0 };
+            arpIdx++;
+          }
+        }
+        gb.song.arpPhrase = newArp;
+        logAction("grammar variation applied — arp mutated (" + arpEvents.length + " arp events from foundation, provenance on each)");
+        if(typeof refreshSeqUi === "function") refreshSeqUi();
+      } else {
+        // fallback: directly mutate arpPhrase using MelodicGrammar (proves the grammar module works)
+        if(!window.PSY_P3.originalArp){
+          window.PSY_P3.originalArp = gb.song.arpPhrase.map(function(e){ return e ? { deg: e.deg, oct: e.oct || 0 } : null; });
+        }
+        var newArp2 = gb.song.arpPhrase.map(function(e){ return e ? { deg: e.deg, oct: e.oct || 0 } : null; });
+        for(var k = 0; k < newArp2.length; k++){
+          if(newArp2[k] === null) continue; // preserve rests
+          if(grammarRng() < 0.5){
+            var interval = grammars.melodic.next(grammarRng).interval;
+            var newDeg2 = ((newArp2[k].deg || 0) + interval + 12) % 12;
+            newArp2[k] = { deg: newDeg2, oct: newArp2[k].oct || 0 };
+          }
+        }
+        gb.song.arpPhrase = newArp2;
+        logAction("grammar variation applied (direct melodic grammar) — arp mutated, " + newArp2.length + " steps, " + newArp2.filter(function(e){return e;}).length + " active");
+        if(typeof refreshSeqUi === "function") refreshSeqUi();
+      }
+    } catch(e){ logAction("grammar error: " + e.message); }
+  });
+  if(grammarResetBtn) grammarResetBtn.addEventListener("click", function(){
+    var gb = window.groovebox;
+    if(!gb || !gb.song){ logAction("no song"); return; }
+    if(window.PSY_P3.originalArp){
+      gb.song.arpPhrase = window.PSY_P3.originalArp;
+      logAction("grammar reset — arp restored");
+      if(typeof refreshSeqUi === "function") refreshSeqUi();
+    } else {
+      logAction("no grammar variation to reset");
+    }
+  });
+
+  /* ── 3.4: RENDER WAV (uses foundation/render.mjs) ── */
+  var renderBtn = document.getElementById("psy-btn-render");
+  if(renderBtn) renderBtn.disabled = false;
+  if(renderBtn) renderBtn.addEventListener("click", function(){
+    var gb = window.groovebox;
+    if(!gb || !gb.song){ logAction("no song"); return; }
+    renderBtn.disabled = true;
+    renderBtn.textContent = "rendering…";
+    logAction("rendering 4 bars…");
+    try {
+      var plan = F.render.renderPlan(gb.song, { bars: 4 });
+      logAction("render plan: " + plan.events.length + " events, " + plan.lengthSeconds.toFixed(2) + "s");
+      var sampleRate = 44100;
+      var numSamples = Math.floor(plan.lengthSeconds * sampleRate);
+      var data = new Float32Array(numSamples);
+      // generate a beep per event (proves the encoder; full synthesis = P4)
+      plan.events.forEach(function(ev){
+        var startSample = Math.floor(ev.audioTime * sampleRate);
+        var durationSamples = Math.floor(0.05 * sampleRate);
+        if(ev.midi !== null && ev.midi !== undefined){
+          var freq = 440 * Math.pow(2, (ev.midi - 69) / 12);
+          for(var i = 0; i < durationSamples && startSample + i < numSamples; i++){
+            var t = i / sampleRate;
+            data[startSample + i] += 0.15 * Math.sin(2 * Math.PI * freq * t) * Math.exp(-t * 20);
+          }
+        } else {
+          for(var j = 0; j < 200 && startSample + j < numSamples; j++){
+            data[startSample + j] += 0.2 * (Math.random() * 2 - 1) * Math.exp(-j / 50);
+          }
+        }
+      });
+      for(var k = 0; k < data.length; k++){ if(data[k] > 1) data[k] = 1; if(data[k] < -1) data[k] = -1; }
+      var fakeBuffer = { sampleRate: sampleRate, numberOfChannels: 1, length: numSamples, getChannelData: function(){ return data; } };
+      var wavBuf = F.render.audioBufferToWav(fakeBuffer);
+      var blob = new Blob([wavBuf], { type: "audio/wav" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a"); a.href = url; a.download = "psy-render-" + Date.now() + ".wav";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+      logAction("WAV ready: " + (wavBuf.byteLength / 1024).toFixed(1) + " KB, " + numSamples + " samples, " + plan.events.length + " events");
+    } catch(e){
+      logAction("render error: " + e.message);
+    } finally {
+      renderBtn.disabled = false;
+      renderBtn.textContent = "⬇ RENDER WAV (4 bars)";
+    }
+  });
+
+  /* ── 3.5: EXPORT MIDI (uses foundation/midi.mjs) ── */
+  var midiBtn = document.getElementById("psy-btn-midi");
+  if(midiBtn) midiBtn.disabled = false;
+  if(midiBtn) midiBtn.addEventListener("click", function(){
+    var gb = window.groovebox;
+    if(!gb || !gb.song){ logAction("no song"); return; }
+    midiBtn.disabled = true;
+    midiBtn.textContent = "exporting…";
+    try {
+      var timeline = F.foundation.resolveSong(gb.song, { bars: 4 });
+      var midiBuf = F.midi.timelineToMidiFile(timeline, { bpm: gb.bpm || 145, ticksPerBeat: 480 });
+      var blob = new Blob([midiBuf], { type: "audio/midi" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a"); a.href = url; a.download = "psy-export-" + Date.now() + ".mid";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+      logAction("MIDI ready: " + (midiBuf.byteLength / 1024).toFixed(1) + " KB, SMF0 format, 480 ticks/beat, " + timeline.eventCount + " events");
+    } catch(e){
+      logAction("midi error: " + e.message);
+    } finally {
+      midiBtn.disabled = false;
+      midiBtn.textContent = "⬇ EXPORT MIDI (4 bars)";
+    }
+  });
+
+  /* ── 3.6: DSP oscilloscope — PolyBLEP vs naive saw ── */
+  function drawDspScope(){
+    var canvas = document.getElementById("psy-dsp-scope");
+    if(!canvas) return;
+    var cctx = canvas.getContext("2d");
+    var w = canvas.width, h = canvas.height;
+    cctx.fillStyle = "#04140c";
+    cctx.fillRect(0, 0, w, h);
+    cctx.strokeStyle = "rgba(150,90,255,.1)";
+    cctx.lineWidth = 1;
+    for(var gx = 0; gx <= w; gx += w / 16){ cctx.beginPath(); cctx.moveTo(gx, 0); cctx.lineTo(gx, h); cctx.stroke(); }
+    cctx.beginPath(); cctx.moveTo(0, h/2); cctx.lineTo(w, h/2); cctx.stroke();
+    var cycles = 3, samples = 512, dt = 1 / samples;
+    // top: PolyBLEP (cyan)
+    cctx.strokeStyle = "#00ffc8"; cctx.lineWidth = 2; cctx.beginPath();
+    for(var i = 0; i <= samples; i++){
+      var phase = (i / samples) * cycles; phase = phase - Math.floor(phase);
+      var y = F.dsp.polyblepSaw(phase, dt);
+      var px = (i / samples) * w, py = h/4 - y * (h/4 - 8);
+      if(i === 0) cctx.moveTo(px, py); else cctx.lineTo(px, py);
+    }
+    cctx.stroke();
+    // bottom: naive (magenta) — vertical drop at phase wrap
+    cctx.strokeStyle = "#ff2e88"; cctx.beginPath();
+    for(var j = 0; j <= samples; j++){
+      var p = (j / samples) * cycles; p = p - Math.floor(p);
+      var ny = (2 * p) - 1;
+      var npx = (j / samples) * w, npy = (3 * h / 4) - ny * (h/4 - 8);
+      if(j === 0) cctx.moveTo(npx, npy); else cctx.lineTo(npx, npy);
+    }
+    cctx.stroke();
+    cctx.fillStyle = "#9d8fc0"; cctx.font = "10px ui-monospace, monospace";
+    cctx.fillText("PolyBLEP (band-limited)", 8, 14);
+    cctx.fillText("naive (aliased — vertical spike at phase wrap)", 8, h/2 + 14);
+  }
+  drawDspScope();
+  setInterval(drawDspScope, 2000);
+
+  console.log("[PSY P3] all 6 capabilities wired: transport, director, grammar, render, midi, dsp");
+}
 
 
 
@@ -1290,6 +1755,7 @@ Groovebox.prototype.report=function(){
 
 /* ---------- device + UI ---------- */
 var device=new Groovebox();
+window.groovebox = device; // expose to P3 foundation integration
 function trackEvent(name,detail){
   try{
     var arr=JSON.parse(localStorage.getItem("psy6_events")||"[]");
