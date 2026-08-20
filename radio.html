@@ -407,14 +407,16 @@ function onAudioProcess(e){
   var SR = AUDIO.sampleRate;
   var dt = 1 / SR;
   var stepDur = 60 / STATE.bpm / 4; // 16th-note duration
+  // use AudioContext.currentTime as authoritative (not a manually-incremented counter)
+  var tBase = AUDIO.currentTime;
   for(var i = 0; i < out.length; i++){
-    var t = STATE.audioTime;
+    var t = tBase + i * dt;
+    STATE.audioTime = t;
     // bar-level scheduling: if we crossed a bar boundary, plan the next bar
     if(t >= STATE.nextBarTime){
       STATE.barIndex++;
       STATE.currentBarPlan = planBar();
       STATE.nextBarTime += 60 / STATE.bpm * 4; // one bar
-      // section name (generative, not fixed SECTION_TEMPLATE)
       var phase = STATE.barIndex % 32;
       if(phase < 4) STATE.sectionName = "INTRO";
       else if(phase < 8) STATE.sectionName = "BUILD";
@@ -422,7 +424,6 @@ function onAudioProcess(e){
       else if(phase < 20) STATE.sectionName = "BREAK";
       else if(phase < 24) STATE.sectionName = "RISER";
       else if(phase < 32) STATE.sectionName = "DROP2";
-      // grammar learning: observe bass transitions from the plan
       if(STATE.currentBarPlan){
         var prevBassDeg = STATE.root;
         for(var s = 0; s < 16; s++){
@@ -438,12 +439,12 @@ function onAudioProcess(e){
     }
     // step-level scheduling: trigger voices at the right audio time
     if(STATE.currentBarPlan){
-      var stepInBar = Math.floor(((t - (STATE.nextBarTime - 60/STATE.bpm*4)) / stepDur));
+      var barStart = STATE.nextBarTime - 60/STATE.bpm*4;
+      var stepInBar = Math.floor((t - barStart) / stepDur);
       if(stepInBar >= 0 && stepInBar < 16){
         var step = STATE.currentBarPlan.steps[stepInBar];
-        // check if we just crossed into this step
-        var stepStart = (STATE.nextBarTime - 60/STATE.bpm*4) + stepInBar * stepDur;
-        if(Math.abs(t - stepStart) < dt * 2){
+        var stepStart = barStart + stepInBar * stepDur;
+        if(t >= stepStart && t < stepStart + dt * 2){
           if(step.kick) triggerVoice(STATE.voices.kick, 0, t);
           if(step.bassNote !== null) triggerVoice(STATE.voices.bass, step.bassNote, t);
           if(step.leadNote !== null) triggerVoice(STATE.voices.lead, step.leadNote, t);
@@ -451,7 +452,7 @@ function onAudioProcess(e){
         }
       }
     }
-    // render all voices per sample
+    // render all voices per sample — REAL DSP (PolyBLEP + ZDF + FM)
     var sample = 0;
     sample += renderVoiceSample(STATE.voices.kick, dt);
     sample += renderVoiceSample(STATE.voices.bass, dt);
@@ -459,15 +460,18 @@ function onAudioProcess(e){
     sample += renderVoiceSample(STATE.voices.pad, dt);
     // master saturation
     sample = F.dsp.tanhSaturation(sample, 0.3 + STATE.energy * 0.4);
-    // soft clip
     if(sample > 1) sample = 1; if(sample < -1) sample = -1;
     out[i] = sample;
     if(STATE.recording && STATE.recordBuffer && STATE.recordOffset < STATE.recordBuffer.length){
       STATE.recordBuffer[STATE.recordOffset++] = sample;
     }
-    STATE.audioTime += dt;
-    STATE.transport.tick(t);
-    if(stepInBar >= 0 && stepInBar % 4 === 0) STATE.transport.observe({audioTime:t, detectedAtAudioTime:t, confidence:0.9, source:"engine"});
+  }
+  // update transport periodically (once per buffer is fine)
+  STATE.transport.tick(tBase);
+  // observe a beat every 4 absSteps (every quarter note)
+  var beatStep = Math.floor((tBase - (STATE.nextBarTime - 60/STATE.bpm*4)) / stepDur);
+  if(beatStep >= 0 && beatStep % 4 === 0){
+    STATE.transport.observe({audioTime: tBase, detectedAtAudioTime: tBase, confidence: 0.9, source: "engine"});
   }
 }
 
@@ -604,6 +608,8 @@ function setupControls(){
 /* ═══════ start ═══════ */
 function start(){
   AUDIO = new (window.AudioContext || window.webkitAudioContext)();
+  // CRITICAL: resume the context (browsers start it suspended until user gesture)
+  if(AUDIO.state === "suspended"){ AUDIO.resume(); }
   MASTER = AUDIO.createGain();
   MASTER.gain.value = 0.7;
   MASTER.connect(AUDIO.destination);
@@ -620,9 +626,17 @@ function start(){
   var wetR = AUDIO.createGain(); wetR.gain.value = 0.2;
   REVERB.connect(wetR); wetR.connect(MASTER);
   // ScriptProcessorNode for per-sample synthesis (1024 samples per block)
-  SCRIPT_NODE = AUDIO.createScriptProcessor(1024, 0, 1);
+  // NOTE: createScriptProcessor(0 in, 1 out) — but some browsers require a non-zero input
+  // count to actually call onaudioprocess. Use 1 input (we ignore it).
+  SCRIPT_NODE = AUDIO.createScriptProcessor(1024, 1, 1);
   SCRIPT_NODE.onaudioprocess = onAudioProcess;
+  // connect: source (a dummy oscillator running silent) → SCRIPT_NODE → MASTER
+  // (ScriptProcessor needs an input source to pull samples in some browsers)
+  var dummy = AUDIO.createOscillator();
+  dummy.frequency.value = 0; // silent
+  dummy.connect(SCRIPT_NODE);
   SCRIPT_NODE.connect(MASTER);
+  dummy.start();
   // also route delay + reverb sends from master (cheap hack — they tap the output)
   var tap = AUDIO.createGain(); tap.gain.value = 0.3;
   MASTER.connect(tap); tap.connect(DELAY); tap.connect(REVERB);
@@ -639,7 +653,7 @@ function start(){
   setupControls();
   updateNowPlaying();
   drawViz();
-  setStatus("● live — " + F ? Object.keys(F).length : 0 + " foundation modules driving synthesis", true);
+  setStatus("● live — " + (F ? Object.keys(F).length : 0) + " foundation modules driving synthesis", true);
   // hide start overlay
   document.getElementById("start").classList.add("hidden");
 }
