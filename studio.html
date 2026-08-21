@@ -1490,14 +1490,8 @@ function masterProcess(x, sr){
 class PsyStudioProcessor extends AudioWorkletProcessor {
   constructor(){
     super();
-    // Use 44100 as fallback (sampleRate not available in constructor, but process() provides it)
-    var sr = 44100;
-    initGrammar(P.seed);
-    if(!P.reverb) P.reverb = new Reverb(sr);
-    if(!P.chorus) P.chorus = new Chorus(sr);
-    if(!P.granular) P.granular = new Granular(sr);
-    if(!P.karplus) P.karplus = new KarplusStrong(sr);
-    if(!P.comb) P.comb = new CombFilter(sr);
+    // Defer all engine init to first process() call (sampleRate not available in constructor)
+    P._inited = false;
     var self = this;
     this.port.onmessage = function(e){
       var d = e.data;
@@ -1528,6 +1522,16 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
   process(inputs, outputs){
     var out=outputs[0], sr=sampleRate, dt=1/sr;
     try {
+    // lazy init on first process() — sampleRate is available here
+    if(!P._inited){
+      initGrammar(P.seed);
+      if(!P.reverb) P.reverb = new Reverb(sr);
+      if(!P.chorus) P.chorus = new Chorus(sr);
+      if(!P.granular) P.granular = new Granular(sr);
+      if(!P.karplus) P.karplus = new KarplusStrong(sr);
+      if(!P.comb) P.comb = new CombFilter(sr);
+      P._inited = true;
+    }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
     var stepDur=60/bpm/4, barDur=60/bpm*4;
     for(var i=0;i<out[0].length;i++){
