@@ -611,6 +611,29 @@ function wavetableOsc(table, phase){
   return table[i0] * (1 - frac) + table[i1] * frac;
 }
 
+// ── Formant filter (vowel sounds via parallel bandpass) ──
+class Formant {
+  constructor(){
+    this.f1 = new ZdfSvf(); this.f2 = new ZdfSvf(); this.f3 = new ZdfSvf();
+    this.vowel = 0; // 0=a, 1=e, 2=i, 3=o, 4=u
+  }
+  process(input, sr){
+    // formant frequencies for vowels (Hz)
+    var vowels = [
+      [800, 1150, 2900],   // a
+      [400, 1700, 2600],   // e
+      [350, 2200, 2900],   // i
+      [450, 800, 2900],    // o
+      [325, 700, 2600],    // u
+    ];
+    var f = vowels[Math.floor(this.vowel) % 5];
+    var o1 = this.f1.process(input, f[0], 0.7, sr).band;
+    var o2 = this.f2.process(input, f[1], 0.7, sr).band;
+    var o3 = this.f3.process(input, f[2], 0.7, sr).band;
+    return o1 * 0.4 + o2 * 0.4 + o3 * 0.2;
+  }
+}
+
 var P = {
   bpm: 144, energy: 0.5, mood: "fullon", seed: 12345, playing: false,
   root: 33, scale: [0,1,4,5,7,8,10],
@@ -631,7 +654,18 @@ var P = {
   swing: 0.55, // 0.5 = straight, 0.66 = full swing
   humanize: 0.3, // 0..1, velocity + timing jitter
   // LFOs (one per voice that needs modulation)
-  bassLFO: null, leadLFO: null, padLFO: null,
+  bassLFO: null, leadLFO: null, padLFO: null, leadVibrato: null, padVibrato: null,
+  // arpeggiator
+  arp: { pattern: [], index: 0, mode: "up", // up/down/up-down/random
+         lastNote: null, counterMelody: [] },
+  // bass variations: gallop/offbeat/pumping/pedal (cycles per section)
+  bassStyle: "gallop",
+  // drum variations
+  drumPattern: 0,
+  // counter-melody voice (harmony to lead)
+  counter: {active:false, phase:0, phase2:0, freq:220, filter:new ZdfSvf(), cutoff:1000, res:0.5, ampEnv:0, gain:0.15, vel:1},
+  // formant filter on lead (vowel morphing)
+  leadFormant: null,
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -651,6 +685,11 @@ function initGrammar(seed){
   if(!P.bassLFO){ P.bassLFO = new LFO(); P.bassLFO.rate = 0.3; P.bassLFO.shape = "sine"; }
   if(!P.leadLFO){ P.leadLFO = new LFO(); P.leadLFO.rate = 4.5; P.leadLFO.shape = "tri"; }
   if(!P.padLFO){ P.padLFO = new LFO(); P.padLFO.rate = 0.15; P.padLFO.shape = "sine"; }
+  // vibrato LFOs (pitch modulation)
+  if(!P.leadVibrato){ P.leadVibrato = new LFO(); P.leadVibrato.rate = 5.5; P.leadVibrato.shape = "sine"; }
+  if(!P.padVibrato){ P.padVibrato = new LFO(); P.padVibrato.rate = 4.0; P.padVibrato.shape = "sine"; }
+  // formant filter on lead
+  if(!P.leadFormant){ P.leadFormant = new Formant(); P.leadFormant.vowel = 0; }
 }
 
 // Chord progression with inversions (root position, 1st inv, 2nd inv)
@@ -691,6 +730,69 @@ function degreeToMidi(deg){
   var invShift = inv === 1 ? -12 : (inv === 2 ? 12 : 0); // 1st inv: down, 2nd inv: up
   return P.root + P.scale[idx] + 12 * oct + chord + (deg < 0 ? invShift : 0);
 }
+// Bass variation patterns (per bar, rotates based on bar index)
+function getBassStyle(barIndex){
+  var phase = barIndex % 32;
+  if(phase < 4) return "pedal";       // INTRO: sustained root
+  if(phase < 8) return "offbeat";     // BUILD: off-beat
+  if(phase < 16) return "gallop";     // DROP: gallop (full-on)
+  if(phase < 20) return "pedal";      // BREAK: back to pedal
+  if(phase < 24) return "pumping";    // RISER: pumping (offbeat + 16ths)
+  return "gallop";                    // DROP2: gallop
+}
+function bassStepFor(style, s){
+  // returns true if bass fires on this 16th step
+  if(style === "gallop") return (s%4===0 || s===6 || s===10 || s===14);
+  if(style === "offbeat") return (s%2===1);
+  if(style === "pumping") return (s%2===0); // every even 16th
+  if(style === "pedal") return (s===0); // only at bar start
+  return (s%4===0);
+}
+
+// Drum pattern variations (4 patterns, cycles based on bar index)
+function getDrumPattern(barIndex){
+  return Math.floor(barIndex / 4) % 4; // change every 4 bars
+}
+function kickStepFor(pattern, s, barRng, tension){
+  if(pattern === 0) return (s%4===0); // 4-on-floor
+  if(pattern === 1) return (s%4===0) || (s===10 && barRng()<0.5); // + ghost
+  if(pattern === 2) return (s%4===0) || (s===14 && barRng()<0.4+tension*0.3); // + syncopated
+  if(pattern === 3) return (s%4===0) || (s===6 && barRng()<0.3) || (s===10 && barRng()<0.3); // double ghost
+  return (s%4===0);
+}
+function hatStepFor(pattern, s){
+  if(pattern === 0) return (s%2===1); // offbeat
+  if(pattern === 1) return (s%2===1) || (s===3); // + extra
+  if(pattern === 2) return (s%2===0); // on-beat
+  if(pattern === 3) return (s%2===1) || (s===7) || (s===15); // busy
+  return (s%2===1);
+}
+
+// Arpeggiator pattern generation
+function generateArpPattern(barIndex){
+  // 8-note arp pattern based on chord
+  var chord = getChordRoot(barIndex);
+  var notes = [0, 2, 4, 7, 4, 2, 7, 4]; // up-down pattern
+  return notes.map(function(n){ return n + chord; });
+}
+function arpNoteFor(pattern, index, mode){
+  if(mode === "up") return pattern[index % pattern.length];
+  if(mode === "down") return pattern[(pattern.length - 1 - (index % pattern.length))];
+  if(mode === "up-down"){
+    var len = pattern.length * 2 - 2;
+    var i = index % len;
+    if(i < pattern.length) return pattern[i];
+    return pattern[len - i];
+  }
+  if(mode === "random") return pattern[Math.floor(Math.random() * pattern.length)];
+  return pattern[index % pattern.length];
+}
+
+// Counter-melody: harmony a third above lead
+function getCounterNote(leadMidi){
+  return leadMidi + (P.scale[2] - P.scale[0]); // a third up (scale degree)
+}
+
 function planBar(){
   var dec = directorDecide();
   if(dec.action !== "play") return {decision:dec, steps:null};
@@ -698,23 +800,44 @@ function planBar(){
   var barRng = mulberry32(subSeed(P.seed, "bar:" + P.barIndex));
   var isDrop = (P.barIndex % 32 >= 8 && P.barIndex % 32 < 16) || (P.barIndex % 32 >= 24);
   var phase = P.barIndex % 32;
+  var bassStyle = getBassStyle(P.barIndex);
+  var drumPat = getDrumPattern(P.barIndex);
+  // generate arp pattern for this bar
+  var arpPattern = generateArpPattern(P.barIndex);
+  var arpMode = ["up","down","up-down","up"][Math.floor(P.barIndex / 8) % 4];
+
   for(var s = 0; s < 16; s++){
-    var st = {kick:false,bassNote:null,leadNote:null,padNote:null,hat:false,clap:false,snare:false,crash:false,_trig:false};
-    if(isDrop || (phase >= 4 && phase < 8)){ if(s%4===0) st.kick=true; if(s===14 && barRng()<0.4+P.tension*0.3) st.kick=true; }
-    if(isDrop && (s%4===0||s===6||s===10||s===14)) st.bassNote=degreeToMidi(-2);
-    if(isDrop && barRng()<0.1+P.tension*0.4 && s%2===0){
-      var total=P.melodicGrammar.hist.reduce(function(a,b){return a+b;},0);
-      var r=barRng()*total,acc=0,interval=0;
-      for(var i=0;i<25;i++){acc+=P.melodicGrammar.hist[i];if(r<acc){interval=i-12;break;}}
-      st.leadNote=degreeToMidi(14+interval);
-      P.melodicGrammar.hist[interval+12]+=0.5;
+    var st = {kick:false,bassNote:null,leadNote:null,padNote:null,hat:false,clap:false,snare:false,crash:false,arpNote:null,counterNote:null,_trig:false};
+    // KICK: drum pattern variation
+    if(isDrop || (phase >= 4 && phase < 8)){
+      if(kickStepFor(drumPat, s, barRng, P.tension)) st.kick = true;
     }
-    if(s===0 && P.barIndex%2===0 && phase<20) st.padNote=degreeToMidi(7+(P.barIndex%4));
+    // BASS: style variation
+    if(isDrop && bassStepFor(bassStyle, s)) st.bassNote = degreeToMidi(-2);
+    // LEAD: melodic grammar
+    if(isDrop && barRng() < 0.1 + P.tension * 0.4 && s % 2 === 0){
+      var total = P.melodicGrammar.hist.reduce(function(a,b){return a+b;},0);
+      var r = barRng() * total, acc = 0, interval = 0;
+      for(var i = 0; i < 25; i++){ acc += P.melodicGrammar.hist[i]; if(r < acc){ interval = i - 12; break; } }
+      var leadNote = degreeToMidi(14 + interval);
+      st.leadNote = leadNote;
+      // counter-melody: harmony a third above
+      st.counterNote = getCounterNote(leadNote);
+      P.melodicGrammar.hist[interval + 12] += 0.5;
+    }
+    // ARP: 8th-note arpeggio in DROP (fills space between lead notes)
+    if(isDrop && s % 2 === 0){
+      var arpDeg = arpNoteFor(arpPattern, Math.floor(s/2), arpMode);
+      st.arpNote = degreeToMidi(arpDeg);
+    }
+    // PAD
+    if(s === 0 && P.barIndex % 2 === 0 && phase < 20) st.padNote = degreeToMidi(7 + (P.barIndex % 4));
+    // DRUMS
     if(isDrop || phase >= 4){
-      if(s%2===1) st.hat=true;
-      if(s===4||s===12) st.clap=true;
-      if((phase===7||phase===15||phase===23||phase===31) && s>=12 && barRng()<0.3+P.tension*0.4) st.snare=true;
-      if(s===0 && (phase===8||phase===24)) st.crash=true;
+      if(hatStepFor(drumPat, s)) st.hat = true;
+      if(s === 4 || s === 12) st.clap = true;
+      if((phase === 7 || phase === 15 || phase === 23 || phase === 31) && s >= 12 && barRng() < 0.3 + P.tension * 0.4) st.snare = true;
+      if(s === 0 && (phase === 8 || phase === 24)) st.crash = true;
     }
     steps.push(st);
   }
@@ -730,6 +853,8 @@ function triggerHat(vel){ P.hat.active=true;P.hat.ampEnv=1;P.hat.vel=vel||1; }
 function triggerClap(vel){ P.clap.active=true;P.clap.ampEnv=1;P.clap.bursts=0;P.clap.vel=vel||1; }
 function triggerSnare(vel){ P.snare.active=true;P.snare.phase=0;P.snare.ampEnv=1;P.snare.vel=vel||1; }
 function triggerCrash(vel){ P.crash.active=true;P.crash.ampEnv=1;P.crash.vel=vel||1; }
+function triggerArp(m,vel){ var v=P.lead; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=600+P.energy*1000+P.macroBrightness*2000; v.fmIndex=20+P.energy*60+P.macroBrightness*40; v.wavetable=(v.wavetable+1)%8; v.vel=(vel||1)*0.6; }
+function triggerCounter(m,vel){ var v=P.counter; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=800+P.energy*800; v.vel=(vel||1)*0.7; }
 
 function rKick(sr){ var v=P.kick; if(!v.active)return 0;
   var click=v.clickEnv>0.1?noiseNext()*v.clickEnv*0.4:0; v.clickEnv*=0.9;
@@ -757,7 +882,11 @@ function rBass(sr,dt){ var v=P.bass; if(!v.active)return 0; v.ampEnv*=0.9985;
   return out*P.mixer.bass.vol*(P.mixer.bass.mute?0:1)*P.sidechainGain; }
 function rLead(sr,dt){ var v=P.lead; if(!v.active)return 0; v.ampEnv*=0.999;
   if(v.ampEnv<0.001){v.active=false;return 0;}
-  v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase); v.phase2+=v.freq*1.005/sr;v.phase2-=Math.floor(v.phase2);
+  // vibrato: pitch LFO modulates frequency
+  var vib = P.leadVibrato.process(dt) * 0.5; // ±0.5% pitch modulation
+  var freqMod = v.freq * (1 + vib * 0.01);
+  v.phase += freqMod/sr; v.phase -= Math.floor(v.phase);
+  v.phase2 += freqMod*1.005/sr; v.phase2 -= Math.floor(v.phase2);
   // LFO: tremolo (amp) + filter modulation
   var lfo=P.leadLFO.process(dt);
   var cutoff=v.cutoff+lfo*400; if(cutoff<100)cutoff=100;
@@ -771,7 +900,18 @@ function rLead(sr,dt){ var v=P.lead; if(!v.active)return 0; v.ampEnv*=0.999;
   var fm=Math.sin(2*Math.PI*v.fmPhase)*v.fmIndex/sr*2*Math.PI;
   var mixed=w*0.4+s1*0.25+s2*0.25+Math.sin(2*Math.PI*v.phase+fm)*0.1;
   var f2=v.filter.process(mixed,cutoff,v.res,sr);
-  return f2.band*v.ampEnv*v.gain*v.vel*(0.7+lfo*0.3)*P.mixer.lead.vol*(P.mixer.lead.mute?0:1); }
+  // formant filter (vowel morphing) — slow vowel change per bar
+  P.leadFormant.vowel = (P.barIndex * 0.25) % 5;
+  var formanted = P.leadFormant.process(f2.band * 0.5, sr);
+  return (f2.band * 0.6 + formanted * 0.4) * v.ampEnv * v.gain * v.vel * (0.7 + lfo * 0.3) * P.mixer.lead.vol * (P.mixer.lead.mute ? 0 : 1);
+}
+function rCounter(sr,dt){ var v=P.counter; if(!v.active)return 0; v.ampEnv*=0.9995;
+  if(v.ampEnv<0.001){v.active=false;return 0;}
+  v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase);
+  var s1=polyblepSaw(v.phase,v.freq/sr);
+  var f=v.filter.process(s1,v.cutoff,0.5,sr);
+  return f.band*v.ampEnv*v.gain*v.vel*P.mixer.lead.vol*0.5*(P.mixer.lead.mute?0:1);
+}
 function rPad(sr,dt){ var v=P.pad; if(!v.active)return 0; v.ampEnv*=0.99997;
   if(v.ampEnv<0.001){v.active=false;return 0;}
   var lfo=P.padLFO.process(dt); // slow amp undulation
@@ -856,8 +996,10 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
             var vel = 0.7 + P.rng() * 0.3 * P.humanize + (1 - P.humanize) * 0.3;
             if(step.kick)triggerKick(vel); if(step.bassNote!==null)triggerBass(step.bassNote, vel);
             if(step.leadNote!==null)triggerLead(step.leadNote, vel); if(step.padNote!==null)triggerPad(step.padNote, vel);
+            if(step.arpNote!==null)triggerArp(step.arpNote, vel * 0.7); // arp uses lead voice, lower vel
+            if(step.counterNote!==null)triggerCounter(step.counterNote, vel * 0.6);
             if(step.hat)triggerHat(vel * 0.6); if(step.clap)triggerClap(vel); if(step.snare)triggerSnare(vel); if(step.crash)triggerCrash(vel * 0.8); } } }
-      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr,dt);s+=rLead(sr,dt);s+=rPad(sr,dt);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);
+      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr,dt);s+=rLead(sr,dt);s+=rCounter(sr,dt);s+=rPad(sr,dt);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);
       P.sidechainGain=P.sidechainGain*0.997+1.0*0.003;
       s=masterProcess(s,sr);
       out[0][i]=s;out[1][i]=s;
