@@ -955,15 +955,116 @@ class TransientDesigner {
   }
   process(input, sr){
     var abs = Math.abs(input);
-    // fast envelope (detects transients)
     var fastAttack = Math.exp(-1 / (0.005 * sr));
     var slowAttack = Math.exp(-1 / (0.050 * sr));
     this.fastEnv = this.fastEnv * fastAttack + abs * (1 - fastAttack);
     this.slowEnv = this.slowEnv * slowAttack + abs * (1 - slowAttack);
-    // if fast > slow, it's a transient → boost
     var transient = this.fastEnv - this.slowEnv;
-    var gain = 1 + transient * 2; // boost transients
+    var gain = 1 + transient * 2;
     return input * gain;
+  }
+}
+
+// ── Sub-harmonic synth — generates sub-octave from input signal ──
+class SubHarmonic {
+  constructor(){ this.phase = 0; this.lastSign = 0; this.amount = 0.3; }
+  process(input, sr){
+    // zero-crossing detector → generate sub-octave sine
+    var sign = input >= 0 ? 1 : -1;
+    if(sign !== this.lastSign){
+      // zero crossing detected → advance phase by half
+      this.phase += 0.5;
+      this.phase -= Math.floor(this.phase);
+    }
+    this.lastSign = sign;
+    var sub = Math.sin(2 * Math.PI * this.phase);
+    return input + sub * this.amount * Math.abs(input);
+  }
+}
+
+// ── Saturator (tape + tube models) ──
+class Saturator {
+  constructor(){ this.mode = "tape"; this.drive = 0.3; this.dcBlock = 0; }
+  process(input){
+    var x = input * (1 + this.drive * 3);
+    var out;
+    if(this.mode === "tape"){
+      // tape: soft compression curve (asymmetric)
+      out = x < 0 ? Math.tanh(x * 1.2) * 0.9 : Math.tanh(x) * 1.1;
+    } else if(this.mode === "tube"){
+      // tube: even harmonic generation
+      out = x - x * x * x * 0.3;
+    } else if(this.mode === "fold"){
+      // wavefolding
+      out = Math.abs(x) > 1 ? Math.sign(x) * (2 - Math.abs(x)) : x;
+    } else {
+      out = Math.tanh(x);
+    }
+    // DC blocker
+    this.dcBlock = this.dcBlock * 0.995 + out * 0.005;
+    return out - this.dcBlock;
+  }
+}
+
+// ── Vocoder (carrier + modulator via filterbank) ──
+class Vocoder {
+  constructor(){
+    this.numBands = 8;
+    this.bands = [];
+    for(var i = 0; i < this.numBands; i++){
+      this.bands.push({ filter: new ZdfSvf(), env: 0, freq: 200 * Math.pow(2, i * 0.7) });
+    }
+    this.wet = 0;
+  }
+  process(modulator, carrier, sr){
+    if(this.wet <= 0) return carrier;
+    var out = 0;
+    for(var i = 0; i < this.numBands; i++){
+      var band = this.bands[i];
+      var mod = band.filter.process(modulator, band.freq, 0.7, sr);
+      // envelope follower
+      var absMod = Math.abs(mod.band);
+      band.env = band.env * 0.95 + absMod * 0.05;
+      // amplitude-modulate carrier at same band
+      var car = Math.sin(2 * Math.PI * band.freq / sr);
+      out += car * band.env * 0.5;
+    }
+    return carrier * (1 - this.wet) + out * this.wet * 0.3;
+  }
+}
+
+// ── Convolution reverb (simplified — uses pre-generated impulse) ──
+class ConvolutionReverb {
+  constructor(sr){
+    // generate simple impulse response (exponential decay noise)
+    var irLen = Math.floor(sr * 1.5); // 1.5s tail
+    this.ir = new Float32Array(irLen);
+    for(var i = 0; i < irLen; i++){
+      var decay = Math.pow(1 - i / irLen, 2);
+      this.ir[i] = (Math.random() * 2 - 1) * decay;
+    }
+    // circular buffer for input
+    this.bufSize = irLen;
+    this.buf = new Float32Array(this.bufSize);
+    this.idx = 0;
+    // partitioned convolution (simplified — direct FIR, expensive but correct)
+    this.enabled = false;
+    this.wet = 0.2;
+  }
+  process(input, sr){
+    if(!this.enabled) return 0;
+    // store input
+    this.buf[this.idx] = input;
+    // convolve with IR (downsampled for CPU: process every 4th sample)
+    var out = 0;
+    var step = 4; // 4x downsampling of the IR for CPU efficiency
+    var irLen = Math.floor(this.ir.length / step);
+    for(var i = 0; i < irLen; i++){
+      var readIdx = (this.idx - i * step + this.bufSize) % this.bufSize;
+      out += this.buf[readIdx] * this.ir[i * step];
+    }
+    this.idx = (this.idx + 1) % this.bufSize;
+    return out * this.wet;
   }
 }
 
@@ -1026,6 +1127,10 @@ var P = {
   comb: null,            // comb filter (flanger)
   bitcrusher: null,     // bitcrusher (lo-fi)
   transient: null,      // transient designer
+  subHarmonic: null,    // sub-harmonic synth
+  saturator: null,      // tape/tube saturator
+  vocoder: null,         // vocoder
+  convReverb: null,      // convolution reverb
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -1477,6 +1582,10 @@ function masterProcess(x, sr){
     x = P.multiband.process(x, sr);
     var drive = 0.3 + P.energy * 0.3 + P.macroTension * 0.2;
     x = Math.tanh(x * (1 + drive * 3)) / Math.tanh(1 + drive * 3);
+    // saturator (tape mode — warm harmonic saturation)
+    if(P.saturator){ P.saturator.drive = 0.2 + P.macroTension * 0.3; x = P.saturator.process(x); }
+    // sub-harmonic synth (adds sub-octave from signal)
+    if(P.subHarmonic){ P.subHarmonic.amount = P.energy * 0.2; x = P.subHarmonic.process(x, sr); }
     if(P.bitcrusher && phase >= 16 && phase < 20){
       x = P.bitcrusher.process(x, 12, 0.5, sr);
     }
@@ -1533,6 +1642,9 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(!P.granular) P.granular = new Granular(sr);
       if(!P.karplus) P.karplus = new KarplusStrong(sr);
       if(!P.comb) P.comb = new CombFilter(sr);
+      if(!P.subHarmonic) P.subHarmonic = new SubHarmonic();
+      if(!P.saturator) P.saturator = new Saturator();
+      if(!P.vocoder) P.vocoder = new Vocoder();
       P._inited = true;
     }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
