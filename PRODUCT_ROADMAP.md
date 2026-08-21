@@ -65,7 +65,7 @@ Three customer journeys:
 | **S5** | Master chain: EQ + comp + limiter (LUFS -14) | Release-quality loudness | ✅ DONE | |
 | **S6** | Presets (4 slots) + save/load | Repeatable workflows | ✅ DONE | |
 | **S7** | Shareable URLs (state in #hash) | Viral distribution | ✅ DONE | |
-| **S8** | PWA installable + mobile-optimized | Native-like UX | ⏸ PENDING |
+| **S8** | PWA installable + mobile-optimized | Native-like UX | ✅ DONE | |
 
 ## S1 — AudioWorklet migration (THE critical fix)
 
