@@ -634,6 +634,26 @@ class Formant {
   }
 }
 
+// ── Ring modulator (multiplies carrier × modulator = sum/difference frequencies) ──
+class RingMod {
+  constructor(){ this.modPhase = 0; this.modFreq = 200; this.depth = 0; }
+  process(input, sr){
+    this.modPhase += this.modFreq / sr;
+    this.modPhase -= Math.floor(this.modPhase);
+    var mod = Math.sin(2 * Math.PI * this.modPhase);
+    return input * (1 - this.depth) + input * mod * this.depth;
+  }
+}
+
+// ── Motif transformation (invert/retrograde/augment) ──
+function transformMotif(notes, op){
+  if(op === "invert") return notes.map(function(n){ return -n; });
+  if(op === "retrograde") return notes.slice().reverse();
+  if(op === "augment") return notes.map(function(n){ return n * 2; }); // double intervals
+  if(op === "diminish") return notes.map(function(n){ return Math.floor(n / 2); });
+  return notes;
+}
+
 var P = {
   bpm: 144, energy: 0.5, mood: "fullon", seed: 12345, playing: false,
   root: 33, scale: [0,1,4,5,7,8,10],
@@ -666,6 +686,14 @@ var P = {
   counter: {active:false, phase:0, phase2:0, freq:220, filter:new ZdfSvf(), cutoff:1000, res:0.5, ampEnv:0, gain:0.15, vel:1},
   // formant filter on lead (vowel morphing)
   leadFormant: null,
+  // ring modulator on lead (metallic bell tones)
+  leadRingMod: null,
+  // motif memory (last 4 bars of lead — for development)
+  motifMemory: [],
+  // bass synth variation (per section): "reese" / "303" / "wobble"
+  bassSynth: "reese",
+  // tempo automation
+  tempoBase: 144, tempoCurrent: 144, tempoAutomation: 0,
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -690,6 +718,8 @@ function initGrammar(seed){
   if(!P.padVibrato){ P.padVibrato = new LFO(); P.padVibrato.rate = 4.0; P.padVibrato.shape = "sine"; }
   // formant filter on lead
   if(!P.leadFormant){ P.leadFormant = new Formant(); P.leadFormant.vowel = 0; }
+  // ring modulator on lead
+  if(!P.leadRingMod){ P.leadRingMod = new RingMod(); P.leadRingMod.modFreq = 280; P.leadRingMod.depth = 0; }
 }
 
 // Chord progression with inversions (root position, 1st inv, 2nd inv)
@@ -793,6 +823,37 @@ function getCounterNote(leadMidi){
   return leadMidi + (P.scale[2] - P.scale[0]); // a third up (scale degree)
 }
 
+// Bass synth variation per section
+function getBassSynth(barIndex){
+  var phase = barIndex % 32;
+  if(phase < 4) return "reese";      // INTRO: reese (thick)
+  if(phase < 8) return "303";        // BUILD: 303 (acid)
+  if(phase < 16) return "reese";     // DROP: reese
+  if(phase < 20) return "wobble";    // BREAK: wobble (LFO-modulated)
+  if(phase < 24) return "303";       // RISER: 303
+  return "reese";                    // DROP2: reese
+}
+
+// Drum fill at section transitions (last bar before section change)
+function isFillBar(barIndex){
+  var phase = barIndex % 32;
+  return phase === 7 || phase === 15 || phase === 23 || phase === 31;
+}
+function fillStep(s, barRng, tension){
+  // fill: snares on 12,13,14,15 with increasing density
+  if(s >= 12 && s < 16){
+    var prob = (s - 11) * 0.2 + tension * 0.3;
+    return barRng() < prob;
+  }
+  return false;
+}
+
+// Motif development: every 8 bars, transform the motif
+function getMotifOp(barIndex){
+  var ops = ["identity", "invert", "retrograde", "augment", "diminish"];
+  return ops[Math.floor(barIndex / 8) % 5];
+}
+
 function planBar(){
   var dec = directorDecide();
   if(dec.action !== "play") return {decision:dec, steps:null};
@@ -802,30 +863,55 @@ function planBar(){
   var phase = P.barIndex % 32;
   var bassStyle = getBassStyle(P.barIndex);
   var drumPat = getDrumPattern(P.barIndex);
-  // generate arp pattern for this bar
+  var bassSynth = getBassSynth(P.barIndex);
+  P.bassSynth = bassSynth;
+  var fillBar = isFillBar(P.barIndex);
+  var motifOp = getMotifOp(P.barIndex);
+  // ring mod depth: activate in BREAK and at section transitions
+  P.leadRingMod.depth = (phase >= 16 && phase < 20) ? 0.3 : 0.0;
+  // tempo automation: slight ritardando at last 2 bars of each 16-bar block
+  if(phase === 14 || phase === 15 || phase === 30 || phase === 31){
+    P.tempoAutomation = -0.02 * (phase % 16 === 14 ? 1 : 2); // -2 to -4 BPM
+  } else {
+    P.tempoAutomation = 0;
+  }
+  P.tempoCurrent = P.tempoBase + P.tempoAutomation;
+
   var arpPattern = generateArpPattern(P.barIndex);
   var arpMode = ["up","down","up-down","up"][Math.floor(P.barIndex / 8) % 4];
+  // store this bar's lead notes for motif development
+  var thisBarLeadNotes = [];
 
   for(var s = 0; s < 16; s++){
     var st = {kick:false,bassNote:null,leadNote:null,padNote:null,hat:false,clap:false,snare:false,crash:false,arpNote:null,counterNote:null,_trig:false};
-    // KICK: drum pattern variation
+    // KICK: drum pattern + fill override
     if(isDrop || (phase >= 4 && phase < 8)){
-      if(kickStepFor(drumPat, s, barRng, P.tension)) st.kick = true;
+      if(fillBar && fillStep(s, barRng, P.tension)){
+        st.snare = true; // fill replaces kick at end
+      } else {
+        if(kickStepFor(drumPat, s, barRng, P.tension)) st.kick = true;
+      }
     }
-    // BASS: style variation
-    if(isDrop && bassStepFor(bassStyle, s)) st.bassNote = degreeToMidi(-2);
-    // LEAD: melodic grammar
+    // BASS: style variation + synth variation affects cutoff
+    if(isDrop && bassStepFor(bassStyle, s)){
+      st.bassNote = degreeToMidi(-2);
+    }
+    // LEAD: melodic grammar + motif development
     if(isDrop && barRng() < 0.1 + P.tension * 0.4 && s % 2 === 0){
       var total = P.melodicGrammar.hist.reduce(function(a,b){return a+b;},0);
       var r = barRng() * total, acc = 0, interval = 0;
       for(var i = 0; i < 25; i++){ acc += P.melodicGrammar.hist[i]; if(r < acc){ interval = i - 12; break; } }
+      // apply motif transformation
+      var motifNotes = [interval];
+      motifNotes = transformMotif(motifNotes, motifOp);
+      interval = motifNotes[0];
       var leadNote = degreeToMidi(14 + interval);
       st.leadNote = leadNote;
-      // counter-melody: harmony a third above
+      thisBarLeadNotes.push(interval);
       st.counterNote = getCounterNote(leadNote);
       P.melodicGrammar.hist[interval + 12] += 0.5;
     }
-    // ARP: 8th-note arpeggio in DROP (fills space between lead notes)
+    // ARP: 8th-note arpeggio in DROP
     if(isDrop && s % 2 === 0){
       var arpDeg = arpNoteFor(arpPattern, Math.floor(s/2), arpMode);
       st.arpNote = degreeToMidi(arpDeg);
@@ -834,18 +920,30 @@ function planBar(){
     if(s === 0 && P.barIndex % 2 === 0 && phase < 20) st.padNote = degreeToMidi(7 + (P.barIndex % 4));
     // DRUMS
     if(isDrop || phase >= 4){
-      if(hatStepFor(drumPat, s)) st.hat = true;
+      if(!fillBar && hatStepFor(drumPat, s)) st.hat = true;
       if(s === 4 || s === 12) st.clap = true;
-      if((phase === 7 || phase === 15 || phase === 23 || phase === 31) && s >= 12 && barRng() < 0.3 + P.tension * 0.4) st.snare = true;
+      // crash at section starts
       if(s === 0 && (phase === 8 || phase === 24)) st.crash = true;
+      // fill: extra snares at end of fill bar
+      if(fillBar && s >= 12 && !st.snare && barRng() < 0.4) st.snare = true;
     }
     steps.push(st);
+  }
+  // store motif for next development cycle
+  if(thisBarLeadNotes.length > 0){
+    P.motifMemory.push(thisBarLeadNotes);
+    if(P.motifMemory.length > 4) P.motifMemory.shift();
   }
   return {decision:dec, steps:steps};
 }
 
 function triggerKick(vel){ var v=P.kick; v.active=true;v.phase=0;v.pitchEnv=1;v.ampEnv=1;v.clickEnv=1;v.freq=120;v.vel=vel||1; P.sidechainGain=0.25; }
-function triggerBass(m,vel){ var v=P.bass; v.active=true;v.phase=0;v.phase2=0;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=120+P.energy*200+P.macroBrightness*300; v.vel=vel||1;
+function triggerBass(m,vel){ var v=P.bass; v.active=true;v.phase=0;v.phase2=0;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.vel=vel||1;
+  // bass synth variation: affects cutoff + resonance
+  if(P.bassSynth === "reese"){ v.cutoff = 150 + P.energy * 150; v.res = 0.4; }
+  else if(P.bassSynth === "303"){ v.cutoff = 300 + P.energy * 400; v.res = 0.7; } // acid: higher cutoff + resonance
+  else if(P.bassSynth === "wobble"){ v.cutoff = 200; v.res = 0.5; } // wobble: LFO will modulate cutoff (handled in rBass)
+  else { v.cutoff = 120 + P.energy * 200; v.res = 0.4; }
   var sv=P.sub; sv.active=true;sv.phase=0;sv.ampEnv=1;sv.freq=440*Math.pow(2,(m-12-69)/12); sv.vel=vel||1; }
 function triggerLead(m,vel){ var v=P.lead; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=600+P.energy*1000+P.macroBrightness*2000; v.fmIndex=20+P.energy*60+P.macroBrightness*40; v.wavetable=(v.wavetable+1)%8; v.vel=vel||1; }
 function triggerPad(m,vel){ var v=P.pad; v.active=true;v.phases=[0,0,0,0,0,0,0];v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=300+P.energy*400+P.macroBrightness*600; v.vel=vel||1; }
@@ -869,16 +967,33 @@ function rSub(sr){ var v=P.sub; if(!v.active)return 0; v.ampEnv*=0.9988;
 function rBass(sr,dt){ var v=P.bass; if(!v.active)return 0; v.ampEnv*=0.9985;
   if(v.ampEnv<0.001){v.active=false;return 0;}
   v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase); v.phase2+=v.freq*0.5/sr;v.phase2-=Math.floor(v.phase2);
-  // LFO modulates filter cutoff (slow sweep)
   var lfo=P.bassLFO.process(dt);
-  var cutoff=v.cutoff+lfo*150; if(cutoff<50)cutoff=50;
-  // reese wavetable for richer bass
+  var cutoff=v.cutoff+lfo*150;
+  // wobble: fast LFO modulates cutoff for dubstep-style wobble
+  if(P.bassSynth === "wobble"){
+    cutoff = v.cutoff + Math.sin(currentTime * 8) * 400 + 400; // 8Hz wobble
+    if(cutoff < 80) cutoff = 80;
+  }
+  if(cutoff<50)cutoff=50;
+  // synth variation: different oscillator mix per bass synth
   var wt=buildWavetables();
-  var reese=wavetableOsc(wt.reese, v.phase);
-  var saw=polyblepSaw(v.phase,v.freq/sr); var sub=Math.sin(2*Math.PI*v.phase2)*0.4;
-  var f=v.filter.process(reese*0.5+saw*0.3+sub*0.2,cutoff,v.res,sr);
+  var osc, sub;
+  if(P.bassSynth === "303"){
+    // 303: square wave (acid character)
+    osc = polyblepSquare(v.phase, v.freq/sr) * 0.6;
+    sub = Math.sin(2*Math.PI*v.phase2) * 0.3;
+  } else if(P.bassSynth === "wobble"){
+    // wobble: sine + saw (smooth, modulated)
+    osc = Math.sin(2*Math.PI*v.phase) * 0.5 + polyblepSaw(v.phase, v.freq/sr) * 0.3;
+    sub = Math.sin(2*Math.PI*v.phase2) * 0.4;
+  } else {
+    // reese: reese wavetable + saw (default)
+    osc = wavetableOsc(wt.reese, v.phase) * 0.5 + polyblepSaw(v.phase, v.freq/sr) * 0.3;
+    sub = Math.sin(2*Math.PI*v.phase2) * 0.4;
+  }
+  var f=v.filter.process(osc+sub,cutoff,v.res,sr);
   var out=f*v.ampEnv*v.gain*v.vel;
-  out=P.bassComp.process(out,0.15,3,2,40,sr); // bass comp for punch
+  out=P.bassComp.process(out,0.15,3,2,40,sr);
   return out*P.mixer.bass.vol*(P.mixer.bass.mute?0:1)*P.sidechainGain; }
 function rLead(sr,dt){ var v=P.lead; if(!v.active)return 0; v.ampEnv*=0.999;
   if(v.ampEnv<0.001){v.active=false;return 0;}
@@ -903,7 +1018,9 @@ function rLead(sr,dt){ var v=P.lead; if(!v.active)return 0; v.ampEnv*=0.999;
   // formant filter (vowel morphing) — slow vowel change per bar
   P.leadFormant.vowel = (P.barIndex * 0.25) % 5;
   var formanted = P.leadFormant.process(f2.band * 0.5, sr);
-  return (f2.band * 0.6 + formanted * 0.4) * v.ampEnv * v.gain * v.vel * (0.7 + lfo * 0.3) * P.mixer.lead.vol * (P.mixer.lead.mute ? 0 : 1);
+  // ring modulator (metallic bell — active in BREAK)
+  var ringed = P.leadRingMod.process(formanted * 0.3, sr);
+  return (f2.band * 0.5 + formanted * 0.3 + ringed * 0.2) * v.ampEnv * v.gain * v.vel * (0.7 + lfo * 0.3) * P.mixer.lead.vol * (P.mixer.lead.mute ? 0 : 1);
 }
 function rCounter(sr,dt){ var v=P.counter; if(!v.active)return 0; v.ampEnv*=0.9995;
   if(v.ampEnv<0.001){v.active=false;return 0;}
@@ -979,7 +1096,9 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
     return {events:events,bpm:P.bpm,bars:bars,lengthSeconds:bars*(60/P.bpm*4)};
   }
   process(inputs, outputs){
-    var out=outputs[0], sr=sampleRate, dt=1/sr, stepDur=60/P.bpm/4, barDur=60/P.bpm*4;
+    var out=outputs[0], sr=sampleRate, dt=1/sr;
+    var bpm = P.tempoCurrent || P.bpm; // tempo automation
+    var stepDur=60/bpm/4, barDur=60/bpm*4;
     for(var i=0;i<out[0].length;i++){
       var t=currentTime+i*dt;
       if(P.playing&&P.nextBarTime===0)P.nextBarTime=t+0.05;
