@@ -1491,9 +1491,9 @@ function masterProcess(x, sr){
 
 class PsyStudioProcessor extends AudioWorkletProcessor {
   constructor(){
-    super(); initGrammar(P.seed);
-    if(!P.reverb) P.reverb = new Reverb(sampleRate);
-    if(!P.chorus) P.chorus = new Chorus(sampleRate);
+    super();
+    // NOTE: sampleRate is NOT available in constructor — defer init to first process() call
+    P._initialized = false;
     var self = this;
     this.port.onmessage = function(e){
       var d = e.data;
@@ -1523,6 +1523,13 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
   }
   process(inputs, outputs){
     var out=outputs[0], sr=sampleRate, dt=1/sr;
+    // lazy init: sampleRate only available in process(), not constructor
+    if(!P._initialized){
+      initGrammar(P.seed);
+      if(!P.reverb) P.reverb = new Reverb(sr);
+      if(!P.chorus) P.chorus = new Chorus(sr);
+      P._initialized = true;
+    }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
     var stepDur=60/bpm/4, barDur=60/bpm*4;
     for(var i=0;i<out[0].length;i++){
