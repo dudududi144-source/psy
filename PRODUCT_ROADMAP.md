@@ -123,6 +123,19 @@ Inline in worklet:
 ## S8 — PWA + mobile
 
 - Inline PWA manifest, installable, mobile-optimized UI
+- ✅ DONE: manifest via Blob URL, service worker (cache-first), install badge, responsive CSS
+
+## S9 — Licensing
+
+- CC-BY 4.0 for free tier (attribution required)
+- Royalty-free for paid tier
+- ✅ DONE: license notice in footer, attribution in exported files
+
+## S10 — API (FUTURE — server-side, out of browser scope)
+
+- `POST /generate` with `{seed, bars, mood, energy}` → WAV
+- For DAW plugin integration (VST/AU wrapper)
+- Status: documented as future work — needs server infrastructure
 
 ## What this roadmap is NOT
 
