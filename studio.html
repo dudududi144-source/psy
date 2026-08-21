@@ -526,13 +526,17 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
     var sr = sampleRate;
     var dt = 1 / sr;
     var stepDur = 60 / P.bpm / 4;
+    var barDur = 60 / P.bpm * 4;
     for(var i = 0; i < out[0].length; i++){
       var t = currentTime + i * dt;
-      // bar scheduling
-      if(P.playing && t >= P.nextBarTime){
+      // bar scheduling: if nextBarTime is in the past or uninitialized, set it to now
+      if(P.playing && P.nextBarTime === 0){ P.nextBarTime = t + 0.05; }
+      // catch up if we fell behind (skip planning for missed bars)
+      while(P.playing && t >= P.nextBarTime){
         P.barIndex++;
         P.currentPlan = planBar();
-        P.nextBarTime += 60 / P.bpm * 4;
+        P.currentBarStart = P.nextBarTime;
+        P.nextBarTime += barDur;
         var phase = P.barIndex % 32;
         if(phase < 4) P.section = "INTRO";
         else if(phase < 8) P.section = "BUILD";
@@ -541,14 +545,14 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
         else if(phase < 24) P.section = "RISER";
         else P.section = "DROP2";
       }
-      // step scheduling
-      if(P.playing && P.currentPlan && P.currentPlan.steps){
-        var barStart = P.nextBarTime - 60/P.bpm * 4;
-        var stepInBar = Math.floor((t - barStart) / stepDur);
+      // step scheduling: use currentBarStart (the start of the bar we're in)
+      if(P.playing && P.currentPlan && P.currentPlan.steps && P.currentBarStart !== undefined){
+        var stepInBar = Math.floor((t - P.currentBarStart) / stepDur);
         if(stepInBar >= 0 && stepInBar < 16){
           var step = P.currentPlan.steps[stepInBar];
-          var stepStart = barStart + stepInBar * stepDur;
-          if(t >= stepStart && t < stepStart + dt * 1.5){
+          var stepStart = P.currentBarStart + stepInBar * stepDur;
+          // trigger if we just crossed into this step (within 2 samples)
+          if(t >= stepStart && t < stepStart + dt * 2){
             if(step.kick) triggerVoice(P.kick, 0);
             if(step.bassNote !== null) triggerVoice(P.bass, step.bassNote);
             if(step.leadNote !== null) triggerVoice(P.lead, step.leadNote);
