@@ -120,7 +120,23 @@ input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;b
   #start h1{font-size:36px}
   .np-section{font-size:22px}
   #viz{width:min(50vh,320px);height:min(50vh,320px)}
+  .header{padding:10px 14px}
+  .brand{font-size:14px}
+  .brand .sub{display:none}
+  .footer{padding:6px 14px;font-size:9px}
+  .dir-indicator{padding:4px 8px;font-size:10px}
+  #btn-export{padding:6px 10px;font-size:9px}
 }
+/* S8: PWA install badge */
+#psy-pwa-badge{position:fixed;bottom:48px;right:14px;background:rgba(15,8,30,.95);
+  border:1px solid var(--cyan);color:var(--cyan);border-radius:8px;padding:8px 14px;
+  font-size:11px;font-family:ui-monospace,monospace;z-index:90;cursor:pointer;display:none;
+  box-shadow:0 4px 14px rgba(0,0,0,.4)}
+#psy-pwa-badge:hover{background:var(--cyan);color:var(--bg)}
+/* S9: license notice in footer */
+.license-notice{color:var(--dim);font-size:9px;font-family:ui-monospace,monospace}
+.license-notice a{color:var(--purple);text-decoration:none}
+.license-notice .cc{color:var(--gold)}
 </style>
 </head>
 <body>
@@ -218,9 +234,16 @@ input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;b
   <!-- footer -->
   <div class="footer">
     <div id="status">loading foundation…</div>
-    <div>PSY STUDIO v1.0 · AudioWorklet · <span style="color:var(--cyan)">github.com/dudududi144-source/psy</span></div>
+    <div class="license-notice">
+      <span class="cc">CC-BY 4.0</span> · generated tracks free to use with attribution ·
+      <a href="https://github.com/dudududi144-source/psy" target="_blank">source</a> ·
+      PSY STUDIO v1.0
+    </div>
   </div>
 </div>
+
+<!-- S8: PWA install badge (shown when browser offers install) -->
+<div id="psy-pwa-badge" title="Install PSY STUDIO as an app">⬇ Install app</div>
 
 <script>
 "use strict";
@@ -238,6 +261,80 @@ input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;b
    - AudioWorkletProcessor.process() runs on AUDIO THREAD → never blocked by UI
    - This is the fix for the "עמוס" (overloaded) + "לייטנסי" (latency) the user reported.
    ═══════════════════════════════════════════════════════════════════ */
+
+/* S8: inline PWA manifest via Blob URL (preserves single-file constraint) */
+(function registerPwaManifest(){
+  try {
+    var manifest = {
+      "name": "PSY STUDIO — Generative Psytrance Production",
+      "short_name": "PSY STUDIO",
+      "description": "Generative psytrance production studio with AudioWorklet synthesis",
+      "start_url": ".",
+      "display": "standalone",
+      "background_color": "#050208",
+      "theme_color": "#050208",
+      "icons": [{
+        "src": "data:image/svg+xml;utf8," + encodeURIComponent(
+          "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>" +
+          "<rect width='64' height='64' rx='12' fill='#050208'/>" +
+          "<text x='32' y='42' font-family='monospace' font-size='20' font-weight='900' " +
+          "text-anchor='middle' fill='#00f0c8'>PSY</text></svg>"
+        ),
+        "sizes": "64x64", "type": "image/svg+xml"
+      }]
+    };
+    var blob = new Blob([JSON.stringify(manifest)], {type: "application/json"});
+    var link = document.createElement("link");
+    link.rel = "manifest";
+    link.href = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  } catch(e) { /* non-fatal */ }
+})();
+
+/* S8: inline service worker (cache-first for offline use) */
+if("serviceWorker" in navigator){
+  try {
+    var swCode = [
+      "const CACHE='psy-studio-v1';",
+      "self.addEventListener('install',function(e){",
+      "  e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['./']);}).then(function(){return self.skipWaiting();}));",
+      "});",
+      "self.addEventListener('activate',function(e){",
+      "  e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));",
+      "});",
+      "self.addEventListener('fetch',function(e){",
+      "  if(e.request.method!=='GET')return;",
+      "  e.respondWith(caches.match(e.request).then(function(hit){return hit||fetch(e.request).then(function(r){if(r&&r.status===200&&r.type==='basic'){var c=r.clone();caches.open(CACHE).then(function(cache){cache.put(e.request,c);});}return r;}).catch(function(){return caches.match('./');});}));",
+      "});"
+    ].join("\n");
+    var swBlob = new Blob([swCode], {type: "application/javascript"});
+    navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(function(err){
+      console.warn("[PSY STUDIO] SW registration failed (non-fatal):", err.message);
+    });
+  } catch(e) { /* non-fatal */ }
+}
+
+/* S8: PWA install prompt handler */
+var _deferredPrompt = null;
+window.addEventListener("beforeinstallprompt", function(e){
+  e.preventDefault(); _deferredPrompt = e;
+  var badge = document.getElementById("psy-pwa-badge");
+  if(badge) badge.style.display = "block";
+});
+window.addEventListener("load", function(){
+  var badge = document.getElementById("psy-pwa-badge");
+  if(badge) badge.addEventListener("click", function(){
+    if(_deferredPrompt){
+      _deferredPrompt.prompt();
+      _deferredPrompt.userChoice.finally(function(){
+        _deferredPrompt = null;
+        badge.style.display = "none";
+      });
+    }
+  });
+});
+
+
 
 var AUDIO = null;
 var MASTER = null;
