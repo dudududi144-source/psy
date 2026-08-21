@@ -648,8 +648,10 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
         if(stepInBar >= 0 && stepInBar < 16){
           var step = P.currentPlan.steps[stepInBar];
           var stepStart = P.currentBarStart + stepInBar * stepDur;
-          // trigger if we just crossed into this step (within 2 samples)
-          if(t >= stepStart && t < stepStart + dt * 2){
+          // trigger if we just crossed into this step (within one render quantum = 128 samples = ~2.9ms)
+          // use a window of stepDur (much larger than dt*2) to avoid missing triggers
+          if(t >= stepStart && t < stepStart + stepDur && !step._triggered){
+            step._triggered = true; // mark so we don't re-trigger within this bar
             if(step.kick) triggerVoice(P.kick, 0);
             if(step.bassNote !== null) triggerVoice(P.bass, step.bassNote);
             if(step.leadNote !== null) triggerVoice(P.lead, step.leadNote);
