@@ -841,6 +841,132 @@ class AdditiveVoice {
   }
 }
 
+// ── FM6: 6-operator FM synthesis (DX7-style algorithm) ──
+// Algorithm: op6→op5→op4→op3→op2→op1 (carrier), with feedback on op6
+class FM6 {
+  constructor(){
+    this.ops = [];
+    for(var i = 0; i < 6; i++){
+      this.ops.push({ phase: 0, ratio: 1, level: 0, feedback: 0, lastOut: 0 });
+    }
+    // DX7-style algorithm 1: chain modulators → carrier
+    this.ops[0].ratio = 1;   this.ops[0].level = 0;   // carrier (op1)
+    this.ops[1].ratio = 1;   this.ops[1].level = 0.5;  // modulator
+    this.ops[2].ratio = 2;   this.ops[2].level = 0.3;
+    this.ops[3].ratio = 3;   this.ops[3].level = 0.2;
+    this.ops[4].ratio = 4;   this.ops[4].level = 0.15;
+    this.ops[5].ratio = 5;   this.ops[5].level = 0.1;  this.ops[5].feedback = 0.3;
+    this.ampEnv = 0; this.active = false; this.freq = 220; this.vel = 1;
+  }
+  trigger(freq, vel){
+    this.freq = freq; this.vel = vel || 1; this.ampEnv = 1; this.active = true;
+    for(var i = 0; i < 6; i++) this.ops[i].phase = 0;
+  }
+  process(sr){
+    if(!this.active) return 0;
+    this.ampEnv *= 0.9995;
+    if(this.ampEnv < 0.001){ this.active = false; return 0; }
+    var modSignal = 0;
+    // chain: op6 (with feedback) → op5 → op4 → op3 → op2 → op1 (carrier)
+    for(var i = 5; i >= 1; i--){
+      var op = this.ops[i];
+      var opFreq = this.freq * op.ratio;
+      op.phase += opFreq / sr;
+      op.phase -= Math.floor(op.phase);
+      var feedback = (i === 5) ? op.lastOut * op.feedback : 0;
+      var output = Math.sin(2 * Math.PI * op.phase + modSignal * op.level * 5 + feedback);
+      op.lastOut = output;
+      modSignal = output;
+    }
+    // carrier (op1)
+    var carrier = this.ops[0];
+    carrier.phase += this.freq / sr;
+    carrier.phase -= Math.floor(carrier.phase);
+    var out = Math.sin(2 * Math.PI * carrier.phase + modSignal * carrier.level * 5);
+    return out * this.ampEnv * 0.15 * this.vel;
+  }
+}
+
+// ── Wave sequencer — modulates wavetable position over time ──
+class WaveSequencer {
+  constructor(){ this.position = 0; this.rate = 0.5; this.steps = 8; this.step = 0; this.lastStep = 0; }
+  process(dt){
+    this.position += this.rate * dt;
+    if(this.position >= 1){
+      this.position = 0;
+      this.step = (this.step + 1) % this.steps;
+    }
+    return this.position;
+  }
+}
+function wavetableMorph(tableA, tableB, phase, mix){
+  // crossfade between two wavetables
+  var a = wavetableOsc(tableA, phase);
+  var b = wavetableOsc(tableB, phase);
+  return a * (1 - mix) + b * mix;
+}
+
+// ── Comb filter (flanger/physical modeling) ──
+class CombFilter {
+  constructor(sr){
+    this.bufSize = Math.floor(sr * 0.05); // 50ms max
+    this.buf = new Float32Array(this.bufSize);
+    this.idx = 0;
+    this.feedback = 0.5;
+    this.delaySamples = Math.floor(sr * 0.005); // 5ms default
+  }
+  process(input, delayMs, feedback, sr){
+    this.delaySamples = Math.floor(sr * Math.max(0.001, Math.min(delayMs, 50)) / 1000);
+    if(this.delaySamples >= this.bufSize) this.delaySamples = this.bufSize - 1;
+    this.feedback = feedback;
+    var readIdx = (this.idx - this.delaySamples + this.bufSize) % this.bufSize;
+    var delayed = this.buf[readIdx];
+    var output = input + delayed * this.feedback;
+    this.buf[this.idx] = output;
+    this.idx = (this.idx + 1) % this.bufSize;
+    return input * 0.5 + delayed * 0.5; // wet/dry mix
+  }
+}
+
+// ── Bitcrusher (lo-fi effect) ──
+class Bitcrusher {
+  constructor(){ this.bits = 16; this.sampleRate = 1; this.lastSample = 0; this.phase = 0; }
+  process(input, bits, rateReduction, sr){
+    this.bits = Math.max(1, Math.min(bits, 16));
+    this.sampleRate = Math.max(0.1, Math.min(rateReduction, 1));
+    // sample rate reduction
+    this.phase += this.sampleRate;
+    if(this.phase >= 1){
+      this.phase -= Math.floor(this.phase);
+      // bit depth reduction
+      var levels = Math.pow(2, this.bits);
+      this.lastSample = Math.round(input * levels / 2) / (levels / 2);
+    }
+    return this.lastSample;
+  }
+}
+
+// ── Transient designer (attack/sustain shaping) ──
+class TransientDesigner {
+  constructor(){
+    this.fastEnv = 0; this.slowEnv = 0;
+    this.fastCoeff = 0.001; this.slowCoeff = 0.0001; // attack coefficients
+    this.attackGain = 1;
+  }
+  process(input, sr){
+    var abs = Math.abs(input);
+    // fast envelope (detects transients)
+    var fastAttack = Math.exp(-1 / (0.005 * sr));
+    var slowAttack = Math.exp(-1 / (0.050 * sr));
+    this.fastEnv = this.fastEnv * fastAttack + abs * (1 - fastAttack);
+    this.slowEnv = this.slowEnv * slowAttack + abs * (1 - slowAttack);
+    // if fast > slow, it's a transient → boost
+    var transient = this.fastEnv - this.slowEnv;
+    var gain = 1 + transient * 2; // boost transients
+    return input * gain;
+  }
+}
+
 var P = {
   bpm: 144, energy: 0.5, mood: "fullon", seed: 12345, playing: false,
   root: 33, scale: [0,1,4,5,7,8,10],
@@ -894,6 +1020,12 @@ var P = {
   phaseDist: null,       // phase distortion for lead (Casio CZ-style)
   karplus: null,         // Karplus-Strong plucked string
   additive: null,        // additive sine bank for bells/atmospheres
+  fm6: null,             // 6-operator FM (DX7-style) for electric piano/bells
+  waveSeq: null,         // wave sequencer for lead wavetable morphing
+  // effects (master chain)
+  comb: null,            // comb filter (flanger)
+  bitcrusher: null,     // bitcrusher (lo-fi)
+  transient: null,      // transient designer
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -932,6 +1064,12 @@ function initGrammar(seed){
   if(!P.phaseDist){ P.phaseDist = new PhaseDistortion(); P.phaseDist.distortion = 0.3; }
   if(!P.karplus){ P.karplus = new KarplusStrong(sampleRate); }
   if(!P.additive){ P.additive = new AdditiveVoice(); }
+  if(!P.fm6){ P.fm6 = new FM6(); }
+  if(!P.waveSeq){ P.waveSeq = new WaveSequencer(); P.waveSeq.rate = 0.5; }
+  // effects
+  if(!P.comb){ P.comb = new CombFilter(sampleRate); }
+  if(!P.bitcrusher){ P.bitcrusher = new Bitcrusher(); }
+  if(!P.transient){ P.transient = new TransientDesigner(); }
 }
 
 // Chord progression with inversions (root position, 1st inv, 2nd inv)
@@ -1099,7 +1237,7 @@ function planBar(){
   var thisBarLeadNotes = [];
 
   for(var s = 0; s < 16; s++){
-    var st = {kick:false,bassNote:null,leadNote:null,padNote:null,hat:false,clap:false,snare:false,crash:false,arpNote:null,counterNote:null,karplusNote:null,additiveNote:null,_trig:false};
+    var st = {kick:false,bassNote:null,leadNote:null,padNote:null,hat:false,clap:false,snare:false,crash:false,arpNote:null,counterNote:null,karplusNote:null,additiveNote:null,fm6Note:null,_trig:false};
     // KICK: drum pattern + fill override
     if(isDrop || (phase >= 4 && phase < 8)){
       if(fillBar && fillStep(s, barRng, P.tension)){
@@ -1139,6 +1277,10 @@ function planBar(){
     // ADDITIVE: bell tones in DROP (sparingly, for accent)
     if(isDrop && s === 8 && barRng() < 0.3){
       st.additiveNote = degreeToMidi(21 + Math.floor(barRng() * 3));
+    }
+    // FM6: electric piano/bell in BREAK (DX7-style)
+    if(phase >= 16 && phase < 20 && s % 4 === 2 && barRng() < 0.4){
+      st.fm6Note = degreeToMidi(14 + (s % 4));
     }
     // PAD
     if(s === 0 && P.barIndex % 2 === 0 && phase < 20) st.padNote = degreeToMidi(7 + (P.barIndex % 4));
@@ -1197,6 +1339,7 @@ function triggerArp(m,vel){ var v=P.lead; v.active=true;v.phase=0;v.phase2=0.5;v
 function triggerCounter(m,vel){ var v=P.counter; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=800+P.energy*800; v.vel=(vel||1)*0.7; }
 function triggerKarplus(m,vel){ var freq=440*Math.pow(2,(m-69)/12); P.karplus.trigger(freq, vel||1); }
 function triggerAdditive(m,vel){ var freq=440*Math.pow(2,(m-69)/12); P.additive.trigger(freq, vel||1); }
+function triggerFM6(m,vel){ var freq=440*Math.pow(2,(m-69)/12); P.fm6.trigger(freq, vel||1); }
 
 function rKick(sr){ var v=P.kick; if(!v.active)return 0;
   var click=v.clickEnv>0.1?noiseNext()*v.clickEnv*0.4:0; v.clickEnv*=0.9;
@@ -1286,6 +1429,10 @@ function rKarplus(sr){
 function rAdditive(sr){
   return P.additive.process(sr) * P.mixer.lead.vol * 0.8 * (P.mixer.lead.mute ? 0 : 1);
 }
+// FM6: 6-operator FM synthesis (DX7-style electric piano/bells)
+function rFM6(sr){
+  return P.fm6.process(sr) * P.mixer.lead.vol * 0.7 * (P.mixer.lead.mute ? 0 : 1);
+}
 function rPad(sr,dt){ var v=P.pad; if(!v.active)return 0; v.ampEnv*=0.99997;
   if(v.ampEnv<0.001){v.active=false;return 0;}
   var lfo=P.padLFO.process(dt); // slow amp undulation
@@ -1311,9 +1458,19 @@ function masterProcess(x, sr){
   if(!P.granular) P.granular = new Granular(sr);
   var granularWet = P.granular.process(x * 0.15, 1/sr, 0.3 + P.macroSpace * 0.5);
   x = x + granularWet * 0.2; // 20% wet granular texture
+  // transient designer: boost transients (kick/snare attack)
+  if(!P.transient) P.transient = new TransientDesigner();
+  x = P.transient.process(x, sr);
   if(!P.reverb) P.reverb = new Reverb(sr);
   var wet = P.reverb.process(x * 0.2, 0.6) * (P.macroSpace * 0.5);
   x = x + wet;
+  // comb filter: subtle flanger in BREAK
+  if(!P.comb) P.comb = new CombFilter(sr);
+  var phase = P.barIndex % 32;
+  if(phase >= 16 && phase < 20){
+    var combWet = P.comb.process(x, 5 + Math.sin(currentTime * 0.5) * 3, 0.3, sr);
+    x = x * 0.7 + combWet * 0.3;
+  }
   if(!P.chorus) P.chorus = new Chorus(sr);
   x = P.chorus.process(x, 0.5, 0.15, sr);
   // multiband compression (3-band)
@@ -1321,6 +1478,11 @@ function masterProcess(x, sr){
   x = P.multiband.process(x, sr);
   var drive = 0.3 + P.energy * 0.3 + P.macroTension * 0.2;
   x = Math.tanh(x * (1 + drive * 3)) / Math.tanh(1 + drive * 3);
+  // bitcrusher: lo-fi effect in BREAK
+  if(!P.bitcrusher) P.bitcrusher = new Bitcrusher();
+  if(phase >= 16 && phase < 20){
+    x = P.bitcrusher.process(x, 12, 0.5, sr); // 12-bit, half sample rate
+  }
   x = P.comp.process(x, 0.126, 4, 5, 50, sr);
   x *= 1.4;
   if(x > 0.95) x = 0.95; if(x < -0.95) x = -0.95;
@@ -1383,8 +1545,9 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
             if(step.counterNote!==null)triggerCounter(step.counterNote, vel * 0.6);
             if(step.karplusNote!==null)triggerKarplus(step.karplusNote, vel * 0.8);
             if(step.additiveNote!==null)triggerAdditive(step.additiveNote, vel * 0.7);
+            if(step.fm6Note!==null)triggerFM6(step.fm6Note, vel * 0.7);
             if(step.hat)triggerHat(vel * 0.6); if(step.clap)triggerClap(vel); if(step.snare)triggerSnare(vel); if(step.crash)triggerCrash(vel * 0.8); } } }
-      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr,dt);s+=rLead(sr,dt);s+=rCounter(sr,dt);s+=rPad(sr,dt);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);s+=rKarplus(sr);s+=rAdditive(sr);
+      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr,dt);s+=rLead(sr,dt);s+=rCounter(sr,dt);s+=rPad(sr,dt);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);s+=rKarplus(sr);s+=rAdditive(sr);s+=rFM6(sr);
       P.sidechainGain=P.sidechainGain*0.997+1.0*0.003;
       s=masterProcess(s,sr);
       // stereo widener: process L+R separately for mid/side
