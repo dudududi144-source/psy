@@ -724,6 +724,123 @@ class PolyVoice {
   }
 }
 
+// ── Granular synthesis (grain cloud) ──
+// Captures input into a buffer, then replays random grains with pitch + position jitter
+class Granular {
+  constructor(sr){
+    this.bufSize = Math.floor(sr * 2); // 2 second buffer
+    this.buf = new Float32Array(this.bufSize);
+    this.writeIdx = 0;
+    this.grains = [];
+    this.maxGrains = 8;
+    this.grainRate = 30; // grains per second
+    this.lastGrain = 0;
+    this.sr = sr;
+  }
+  capture(input){
+    this.buf[this.writeIdx] = input;
+    this.writeIdx = (this.writeIdx + 1) % this.bufSize;
+  }
+  spawnGrain(t){
+    if(this.grains.length >= this.maxGrains) return;
+    var pos = Math.floor(Math.random() * this.bufSize);
+    var len = Math.floor(this.sr * (0.05 + Math.random() * 0.15)); // 50-200ms
+    var pitch = 0.5 + Math.random() * 1.5; // 0.5x to 2x pitch
+    this.grains.push({ pos: pos, len: len, readPos: 0, pitch: pitch, amp: 0.3 + Math.random() * 0.4 });
+  }
+  process(input, dt, density){
+    this.capture(input);
+    var t = performance.now() / 1000;
+    if(t - this.lastGrain > 1 / (this.grainRate * density)){
+      this.spawnGrain(t);
+      this.lastGrain = t;
+    }
+    var out = 0;
+    for(var i = this.grains.length - 1; i >= 0; i--){
+      var g = this.grains[i];
+      var readIdx = (g.pos + Math.floor(g.readPos)) % this.bufSize;
+      // Hann window for smooth grain edges
+      var progress = g.readPos / g.len;
+      var window = 0.5 * (1 - Math.cos(2 * Math.PI * progress));
+      out += this.buf[readIdx] * window * g.amp;
+      g.readPos += g.pitch;
+      if(g.readPos >= g.len) this.grains.splice(i, 1);
+    }
+    return out / Math.max(1, this.grains.length) * 0.5;
+  }
+}
+
+// ── Phase distortion synthesis (Casio CZ-style) ──
+// Distorts the phase of a sine wave to create new waveforms
+class PhaseDistortion {
+  constructor(){ this.phase = 0; this.distortion = 0; } // 0=sine, 1=saw-ish
+  process(freq, sr){
+    this.phase += freq / sr;
+    this.phase -= Math.floor(this.phase);
+    var p = this.phase;
+    var d = this.distortion;
+    // bend the phase at the distortion point
+    if(p < d) p = p / d * 0.5;
+    else p = 0.5 + (p - d) / (1 - d) * 0.5;
+    return Math.sin(2 * Math.PI * p);
+  }
+}
+
+// ── Karplus-Strong physical modeling (plucked string) ──
+class KarplusStrong {
+  constructor(sr){
+    this.bufSize = Math.floor(sr * 0.1); // max 100ms delay
+    this.buf = new Float32Array(this.bufSize);
+    this.idx = 0;
+    this.len = 0;
+    this.active = false;
+    this.damping = 0.5;
+    this.sr = sr;
+  }
+  trigger(freq, vel){
+    this.len = Math.floor(this.sr / Math.max(20, freq));
+    if(this.len >= this.bufSize) this.len = this.bufSize - 1;
+    // fill buffer with noise burst (excitation)
+    for(var i = 0; i < this.len; i++) this.buf[i] = (Math.random() * 2 - 1) * (vel || 1);
+    this.idx = 0;
+    this.active = true;
+  }
+  process(sr){
+    if(!this.active) return 0;
+    var out = this.buf[this.idx];
+    var next = (this.idx + 1) % this.len;
+    // delay line + lowpass feedback (the "string" decays)
+    this.buf[this.idx] = (out + this.buf[next]) * 0.5 * (1 - this.damping * 0.01);
+    this.idx = next;
+    if(Math.abs(out) < 0.001) this.active = false;
+    return out * 0.5;
+  }
+}
+
+// ── Additive synthesis (sine bank) ──
+// Sum of harmonically-related sines with individual amplitude control
+class AdditiveVoice {
+  constructor(){ this.phase = 0; this.ampEnv = 0; this.active = false; this.harmonics = 8; }
+  trigger(freq, vel){
+    this.phase = 0; this.ampEnv = 1; this.active = true; this.freq = freq; this.vel = vel || 1;
+  }
+  process(sr){
+    if(!this.active) return 0;
+    this.ampEnv *= 0.9995;
+    if(this.ampEnv < 0.001){ this.active = false; return 0; }
+    this.phase += this.freq / sr;
+    this.phase -= Math.floor(this.phase);
+    // sum harmonics with decreasing amplitude (bell-like)
+    var out = 0;
+    for(var h = 1; h <= this.harmonics; h++){
+      var amp = 1 / (h * h); // 1/n² decay (bell-like)
+      var detune = 1 + h * 0.0001; // slight inharmonicity for bell character
+      out += Math.sin(2 * Math.PI * this.phase * h * detune) * amp;
+    }
+    return out * this.ampEnv * 0.1 * this.vel;
+  }
+}
+
 var P = {
   bpm: 144, energy: 0.5, mood: "fullon", seed: 12345, playing: false,
   root: 33, scale: [0,1,4,5,7,8,10],
@@ -772,6 +889,11 @@ var P = {
   polyLead: null, polyMode: false,
   // sidechain variation: alternate ducking patterns
   sidechainPattern: 0,
+  // advanced synthesis engines
+  granular: null,        // granular cloud for atmospheric textures
+  phaseDist: null,       // phase distortion for lead (Casio CZ-style)
+  karplus: null,         // Karplus-Strong plucked string
+  additive: null,        // additive sine bank for bells/atmospheres
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -805,6 +927,11 @@ function initGrammar(seed){
   if(!P.multiband){ P.multiband = new MultibandComp(); }
   // polyphonic lead
   if(!P.polyLead){ P.polyLead = new PolyVoice(); }
+  // advanced synthesis engines
+  if(!P.granular){ P.granular = new Granular(sampleRate); }
+  if(!P.phaseDist){ P.phaseDist = new PhaseDistortion(); P.phaseDist.distortion = 0.3; }
+  if(!P.karplus){ P.karplus = new KarplusStrong(sampleRate); }
+  if(!P.additive){ P.additive = new AdditiveVoice(); }
 }
 
 // Chord progression with inversions (root position, 1st inv, 2nd inv)
@@ -972,7 +1099,7 @@ function planBar(){
   var thisBarLeadNotes = [];
 
   for(var s = 0; s < 16; s++){
-    var st = {kick:false,bassNote:null,leadNote:null,padNote:null,hat:false,clap:false,snare:false,crash:false,arpNote:null,counterNote:null,_trig:false};
+    var st = {kick:false,bassNote:null,leadNote:null,padNote:null,hat:false,clap:false,snare:false,crash:false,arpNote:null,counterNote:null,karplusNote:null,additiveNote:null,_trig:false};
     // KICK: drum pattern + fill override
     if(isDrop || (phase >= 4 && phase < 8)){
       if(fillBar && fillStep(s, barRng, P.tension)){
@@ -1004,6 +1131,14 @@ function planBar(){
     if(isDrop && s % 2 === 0){
       var arpDeg = arpNoteFor(arpPattern, Math.floor(s/2), arpMode);
       st.arpNote = degreeToMidi(arpDeg);
+    }
+    // KARPLUS-STRONG: plucked string in BREAK (atmospheric, sparse)
+    if(phase >= 16 && phase < 20 && s % 4 === 0 && barRng() < 0.5){
+      st.karplusNote = degreeToMidi(14 + (s % 3));
+    }
+    // ADDITIVE: bell tones in DROP (sparingly, for accent)
+    if(isDrop && s === 8 && barRng() < 0.3){
+      st.additiveNote = degreeToMidi(21 + Math.floor(barRng() * 3));
     }
     // PAD
     if(s === 0 && P.barIndex % 2 === 0 && phase < 20) st.padNote = degreeToMidi(7 + (P.barIndex % 4));
@@ -1060,6 +1195,8 @@ function triggerSnare(vel){ P.snare.active=true;P.snare.phase=0;P.snare.ampEnv=1
 function triggerCrash(vel){ P.crash.active=true;P.crash.ampEnv=1;P.crash.vel=vel||1; }
 function triggerArp(m,vel){ var v=P.lead; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=600+P.energy*1000+P.macroBrightness*2000; v.fmIndex=20+P.energy*60+P.macroBrightness*40; v.wavetable=(v.wavetable+1)%8; v.vel=(vel||1)*0.6; }
 function triggerCounter(m,vel){ var v=P.counter; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=800+P.energy*800; v.vel=(vel||1)*0.7; }
+function triggerKarplus(m,vel){ var freq=440*Math.pow(2,(m-69)/12); P.karplus.trigger(freq, vel||1); }
+function triggerAdditive(m,vel){ var freq=440*Math.pow(2,(m-69)/12); P.additive.trigger(freq, vel||1); }
 
 function rKick(sr){ var v=P.kick; if(!v.active)return 0;
   var click=v.clickEnv>0.1?noiseNext()*v.clickEnv*0.4:0; v.clickEnv*=0.9;
@@ -1141,6 +1278,14 @@ function rCounter(sr,dt){ var v=P.counter; if(!v.active)return 0; v.ampEnv*=0.99
   var f=v.filter.process(s1,v.cutoff,0.5,sr);
   return f.band*v.ampEnv*v.gain*v.vel*P.mixer.lead.vol*0.5*(P.mixer.lead.mute?0:1);
 }
+// Karplus-Strong plucked string (physical modeling)
+function rKarplus(sr){
+  return P.karplus.process(sr) * P.mixer.lead.vol * 0.6 * (P.mixer.lead.mute ? 0 : 1);
+}
+// Additive synthesis (sine bank — bell-like)
+function rAdditive(sr){
+  return P.additive.process(sr) * P.mixer.lead.vol * 0.8 * (P.mixer.lead.mute ? 0 : 1);
+}
 function rPad(sr,dt){ var v=P.pad; if(!v.active)return 0; v.ampEnv*=0.99997;
   if(v.ampEnv<0.001){v.active=false;return 0;}
   var lfo=P.padLFO.process(dt); // slow amp undulation
@@ -1162,6 +1307,10 @@ function rCrash(sr){ var v=P.crash; if(!v.active)return 0; v.ampEnv*=0.9995;
   if(v.ampEnv<0.001){v.active=false;return 0;} return noiseNext()*v.ampEnv*v.gain*v.vel*P.mixer.drums.vol*(P.mixer.drums.mute?0:1)*0.4; }
 
 function masterProcess(x, sr){
+  // granular synthesis: capture mix into grain cloud (atmospheric texture)
+  if(!P.granular) P.granular = new Granular(sr);
+  var granularWet = P.granular.process(x * 0.15, 1/sr, 0.3 + P.macroSpace * 0.5);
+  x = x + granularWet * 0.2; // 20% wet granular texture
   if(!P.reverb) P.reverb = new Reverb(sr);
   var wet = P.reverb.process(x * 0.2, 0.6) * (P.macroSpace * 0.5);
   x = x + wet;
@@ -1230,10 +1379,12 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
             var vel = 0.7 + P.rng() * 0.3 * P.humanize + (1 - P.humanize) * 0.3;
             if(step.kick)triggerKick(vel); if(step.bassNote!==null)triggerBass(step.bassNote, vel);
             if(step.leadNote!==null)triggerLead(step.leadNote, vel); if(step.padNote!==null)triggerPad(step.padNote, vel);
-            if(step.arpNote!==null)triggerArp(step.arpNote, vel * 0.7); // arp uses lead voice, lower vel
+            if(step.arpNote!==null)triggerArp(step.arpNote, vel * 0.7);
             if(step.counterNote!==null)triggerCounter(step.counterNote, vel * 0.6);
+            if(step.karplusNote!==null)triggerKarplus(step.karplusNote, vel * 0.8);
+            if(step.additiveNote!==null)triggerAdditive(step.additiveNote, vel * 0.7);
             if(step.hat)triggerHat(vel * 0.6); if(step.clap)triggerClap(vel); if(step.snare)triggerSnare(vel); if(step.crash)triggerCrash(vel * 0.8); } } }
-      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr,dt);s+=rLead(sr,dt);s+=rCounter(sr,dt);s+=rPad(sr,dt);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);
+      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr,dt);s+=rLead(sr,dt);s+=rCounter(sr,dt);s+=rPad(sr,dt);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);s+=rKarplus(sr);s+=rAdditive(sr);
       P.sidechainGain=P.sidechainGain*0.997+1.0*0.003;
       s=masterProcess(s,sr);
       // stereo widener: process L+R separately for mid/side
