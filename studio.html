@@ -1454,38 +1454,36 @@ function rCrash(sr){ var v=P.crash; if(!v.active)return 0; v.ampEnv*=0.9995;
   if(v.ampEnv<0.001){v.active=false;return 0;} return noiseNext()*v.ampEnv*v.gain*v.vel*P.mixer.drums.vol*(P.mixer.drums.mute?0:1)*0.4; }
 
 function masterProcess(x, sr){
-  // granular synthesis: capture mix into grain cloud (atmospheric texture)
-  if(!P.granular) P.granular = new Granular(sr);
-  var granularWet = P.granular.process(x * 0.15, 1/sr, 0.3 + P.macroSpace * 0.5);
-  x = x + granularWet * 0.2; // 20% wet granular texture
-  // transient designer: boost transients (kick/snare attack)
-  if(!P.transient) P.transient = new TransientDesigner();
-  x = P.transient.process(x, sr);
-  if(!P.reverb) P.reverb = new Reverb(sr);
-  var wet = P.reverb.process(x * 0.2, 0.6) * (P.macroSpace * 0.5);
-  x = x + wet;
-  // comb filter: subtle flanger in BREAK
-  if(!P.comb) P.comb = new CombFilter(sr);
-  var phase = P.barIndex % 32;
-  if(phase >= 16 && phase < 20){
-    var combWet = P.comb.process(x, 5 + Math.sin(currentTime * 0.5) * 3, 0.3, sr);
-    x = x * 0.7 + combWet * 0.3;
-  }
-  if(!P.chorus) P.chorus = new Chorus(sr);
-  x = P.chorus.process(x, 0.5, 0.15, sr);
-  // multiband compression (3-band)
-  if(!P.multiband) P.multiband = new MultibandComp();
-  x = P.multiband.process(x, sr);
-  var drive = 0.3 + P.energy * 0.3 + P.macroTension * 0.2;
-  x = Math.tanh(x * (1 + drive * 3)) / Math.tanh(1 + drive * 3);
-  // bitcrusher: lo-fi effect in BREAK
-  if(!P.bitcrusher) P.bitcrusher = new Bitcrusher();
-  if(phase >= 16 && phase < 20){
-    x = P.bitcrusher.process(x, 12, 0.5, sr); // 12-bit, half sample rate
-  }
-  x = P.comp.process(x, 0.126, 4, 5, 50, sr);
-  x *= 1.4;
-  if(x > 0.95) x = 0.95; if(x < -0.95) x = -0.95;
+  try {
+    // granular synthesis: capture mix into grain cloud (atmospheric texture)
+    if(P.granular){
+      var granularWet = P.granular.process(x * 0.15, 1/sr, 0.3 + P.macroSpace * 0.5);
+      x = x + (granularWet || 0) * 0.2;
+    }
+    // transient designer
+    if(P.transient) x = P.transient.process(x, sr);
+    if(!P.reverb) P.reverb = new Reverb(sr);
+    var wet = P.reverb.process(x * 0.2, 0.6) * (P.macroSpace * 0.5);
+    x = x + (wet || 0);
+    // comb filter: subtle flanger in BREAK
+    var phase = P.barIndex % 32;
+    if(P.comb && phase >= 16 && phase < 20){
+      var combWet = P.comb.process(x, 5 + Math.sin(currentTime * 0.5) * 3, 0.3, sr);
+      x = x * 0.7 + (combWet || 0) * 0.3;
+    }
+    if(!P.chorus) P.chorus = new Chorus(sr);
+    x = P.chorus.process(x, 0.5, 0.15, sr);
+    if(!P.multiband) P.multiband = new MultibandComp();
+    x = P.multiband.process(x, sr);
+    var drive = 0.3 + P.energy * 0.3 + P.macroTension * 0.2;
+    x = Math.tanh(x * (1 + drive * 3)) / Math.tanh(1 + drive * 3);
+    if(P.bitcrusher && phase >= 16 && phase < 20){
+      x = P.bitcrusher.process(x, 12, 0.5, sr);
+    }
+    x = P.comp.process(x, 0.126, 4, 5, 50, sr);
+    x *= 1.4;
+    if(x > 0.95) x = 0.95; if(x < -0.95) x = -0.95;
+  } catch(e) { /* swallow to keep worklet alive */ }
   return x;
 }
 
@@ -1529,6 +1527,7 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
   }
   process(inputs, outputs){
     var out=outputs[0], sr=sampleRate, dt=1/sr;
+    try {
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
     var stepDur=60/bpm/4, barDur=60/bpm*4;
     for(var i=0;i<out[0].length;i++){
@@ -1563,6 +1562,7 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
     }
     if(currentTime-P.lastMetricPost>0.1){ P.lastMetricPost=currentTime;
       this.port.postMessage({type:"metrics",barIndex:P.barIndex,section:P.section,bpm:P.bpm,energy:P.energy,tension:P.tension,chordRoot:getChordRoot(P.barIndex),directorAction:P.currentPlan?P.currentPlan.decision.action:"abstain",directorReason:P.currentPlan?P.currentPlan.decision.reason:"init",mixer:P.mixer,macros:{tension:P.macroTension,brightness:P.macroBrightness,space:P.macroSpace}}); }
+    } catch(e) { /* swallow errors to keep worklet alive */ }
     return true;
   }
 }
