@@ -1538,6 +1538,8 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       var t=currentTime+i*dt;
       if(P.playing&&P.nextBarTime===0)P.nextBarTime=t+0.05;
       while(P.playing&&t>=P.nextBarTime){ P.barIndex++;P.tension=getTension(P.barIndex);P.section=getSection(P.barIndex);P.currentPlan=planBar();P.currentBarStart=P.nextBarTime;P.nextBarTime+=barDur; }
+      // overall gain reduction to prevent clipping with 15+ voices
+      var gainScale = 0.5;
       if(P.playing&&P.currentPlan&&P.currentPlan.steps){
         var stepInBar=Math.floor((t-P.currentBarStart)/stepDur);
         if(stepInBar>=0&&stepInBar<16){ var step=P.currentPlan.steps[stepInBar];
@@ -1557,6 +1559,7 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
             if(step.fm6Note!==null)triggerFM6(step.fm6Note, vel * 0.7);
             if(step.hat)triggerHat(vel * 0.6); if(step.clap)triggerClap(vel); if(step.snare)triggerSnare(vel); if(step.crash)triggerCrash(vel * 0.8); } } }
       var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr,dt);s+=rLead(sr,dt);s+=rCounter(sr,dt);s+=rPad(sr,dt);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);s+=rKarplus(sr);s+=rAdditive(sr);s+=rFM6(sr);
+      s = s * gainScale; // prevent clipping with many voices
       P.sidechainGain=P.sidechainGain*0.997+1.0*0.003;
       s=masterProcess(s,sr);
       // stereo widener: process L+R separately for mid/side
