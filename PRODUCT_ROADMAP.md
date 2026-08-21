@@ -58,13 +58,13 @@ Three customer journeys:
 
 | Phase | Capability | Commercial value | Status |
 |---|---|---|---|
-| **S1** | AudioWorklet migration — all DSP moves to audio thread | Fixes overload + latency | 🔄 IN PROGRESS |
-| **S2** | Export full track (1/5/10/30 min WAV) | Producer renders release-ready track | ⏸ PENDING |
-| **S3** | Export stems (kick/bass/lead/pad/master) | Producer remixes in DAW | ⏸ PENDING |
-| **S4** | Export MIDI + project file (.psy.json) | Producer reloads + edits in DAW | ⏸ PENDING |
-| **S5** | Master chain: EQ + comp + limiter (LUFS -14) | Release-quality loudness | ⏸ PENDING |
-| **S6** | Presets (4 slots) + save/load | Repeatable workflows | ⏸ PENDING |
-| **S7** | Shareable URLs (state in #hash) | Viral distribution | ⏸ PENDING |
+| **S1** | AudioWorklet migration — all DSP moves to audio thread | Fixes overload + latency | ✅ DONE | |
+| **S2** | Export full track (1/5/10/30 min WAV) | Producer renders release-ready track | ✅ DONE | |
+| **S3** | Export stems (kick/bass/lead/pad/master) | Producer remixes in DAW | ✅ DONE | |
+| **S4** | Export MIDI + project file (.psy.json) | Producer reloads + edits in DAW | ✅ DONE | |
+| **S5** | Master chain: EQ + comp + limiter (LUFS -14) | Release-quality loudness | ✅ DONE | |
+| **S6** | Presets (4 slots) + save/load | Repeatable workflows | ✅ DONE | |
+| **S7** | Shareable URLs (state in #hash) | Viral distribution | ✅ DONE | |
 | **S8** | PWA installable + mobile-optimized | Native-like UX | ⏸ PENDING |
 
 ## S1 — AudioWorklet migration (THE critical fix)
