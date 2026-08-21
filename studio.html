@@ -393,6 +393,77 @@ function polyblepSquare(phase, dt){
   return naive + b1 * 2 - b2 * 2;
 }
 
+// A: Wavetable oscillator — pre-computed single-cycle waveform, linear interpolation
+var _wavetables = null;
+function buildWavetables(){
+  if(_wavetables) return _wavetables;
+  var size = 256;
+  var wt = {};
+  // "saw" = polyblep saw sampled
+  wt.saw = new Float32Array(size);
+  wt.square = new Float32Array(size);
+  wt.triangle = new Float32Array(size);
+  wt.sine = new Float32Array(size);
+  wt.psy = new Float32Array(size); // custom: saw + 2nd harmonic + slight noise
+  var dt = 1/size;
+  for(var i = 0; i < size; i++){
+    var ph = i / size;
+    wt.saw[i] = polyblepSaw(ph, dt);
+    wt.square[i] = polyblepSquare(ph, dt);
+    wt.triangle[i] = 2 * Math.abs(2 * (ph - Math.floor(ph + 0.5))) - 1;
+    wt.sine[i] = Math.sin(2 * Math.PI * ph);
+    wt.psy[i] = 0.6 * polyblepSaw(ph, dt) + 0.3 * Math.sin(2*Math.PI*ph*2) + 0.1 * (Math.sin(2*Math.PI*ph*7));
+  }
+  _wavetables = wt;
+  return wt;
+}
+function wavetableOsc(table, phase){
+  var p = phase - Math.floor(phase);
+  var idx = p * table.length;
+  var i0 = Math.floor(idx) % table.length;
+  var i1 = (i0 + 1) % table.length;
+  var frac = idx - Math.floor(idx);
+  return table[i0] * (1 - frac) + table[i1] * frac;
+}
+
+// A: Schroeder reverb (allpass network) — lightweight, runs in worklet
+class SchroederReverb {
+  constructor(sr){
+    this.ap1 = { buf: new Float32Array(Math.floor(sr * 0.0123)), idx: 0 };  // 12.3ms
+    this.ap2 = { buf: new Float32Array(Math.floor(sr * 0.0257)), idx: 0 };  // 25.7ms
+    this.ap3 = { buf: new Float32Array(Math.floor(sr * 0.0341)), idx: 0 };  // 34.1ms
+    this.ap4 = { buf: new Float32Array(Math.floor(sr * 0.0456)), idx: 0 };  // 45.6ms
+    this.d1 = { buf: new Float32Array(Math.floor(sr * 0.0897)), idx: 0 };  // 89.7ms
+    this.d2 = { buf: new Float32Array(Math.floor(sr * 0.1134)), idx: 0 };  // 113.4ms
+    this.d3 = { buf: new Float32Array(Math.floor(sr * 0.1412)), idx: 0 };  // 141.2ms
+    this.d4 = { buf: new Float32Array(Math.floor(sr * 0.1557)), idx: 0 };  // 155.7ms
+  }
+  allpass(node, input, decay){
+    var out = node.buf[node.idx];
+    node.buf[node.idx] = input + out * decay;
+    node.idx = (node.idx + 1) % node.buf.length;
+    return out - input * decay;
+  }
+  delay(node, input){
+    var out = node.buf[node.idx];
+    node.buf[node.idx] = input;
+    node.idx = (node.idx + 1) % node.buf.length;
+    return out;
+  }
+  process(input, decay){
+    var x = this.allpass(this.ap1, input, 0.7);
+    x = this.allpass(this.ap2, x, 0.7);
+    x = this.allpass(this.ap3, x, 0.7);
+    x = this.allpass(this.ap4, x, 0.7);
+    var d1 = this.delay(this.d1, x) * decay;
+    var d2 = this.delay(this.d2, x) * decay;
+    var d3 = this.delay(this.d3, x) * decay;
+    var d4 = this.delay(this.d4, x) * decay;
+    // feedback: -1, +1, -1, +1 polarity for stereo decorrelation (mono here)
+    return (d1 - d2 + d3 - d4) * 0.5;
+  }
+}
+
 class ZdfSvf {
   constructor(){ this.ic1eq=0; this.ic2eq=0; }
   process(input, cutoff, resonance, sr){
@@ -442,8 +513,15 @@ var P = {
   // voices
   kick: { active:false, phase:0, freq:60, pitchEnv:0, ampEnv:0, gain:0.85 },
   bass: { active:false, phase:0, freq:55, filter:new ZdfSvf(), cutoff:200, res:0.4, ampEnv:0, gain:0.45 },
-  lead: { active:false, phase:0, freq:220, filter:new ZdfSvf(), cutoff:1200, res:0.6, fmPhase:0, fmRatio:2, fmIndex:50, ampEnv:0, gain:0.15 },
+  sub: { active:false, phase:0, freq:27.5, ampEnv:0, gain:0.35 }, // A: sub-bass (sine, octave below bass)
+  lead: { active:false, phase:0, freq:220, filter:new ZdfSvf(), cutoff:1200, res:0.6, fmPhase:0, fmRatio:2, fmIndex:50, ampEnv:0, gain:0.15, wavetable:0 },
   pad: { active:false, phases:[0,0,0], detunes:[0.997,1.0,1.003], freq:110, filter:new ZdfSvf(), cutoff:800, res:0.2, ampEnv:0, gain:0.1 },
+  // A: sidechain — kick ducks the bass/sub/pad gain
+  sidechainGain: 1.0,
+  // A: reverb — Schroeder allpass network (one for the whole mix)
+  reverb: null,
+  // A: wavetables (built lazily on first use)
+  wavetables: null,
   // master
   comp: new Comp(),
   // grammar
@@ -505,9 +583,17 @@ function planBar(){
 }
 
 function triggerVoice(v, midi){
-  if(v === P.kick){ v.active=true; v.phase=0; v.pitchEnv=1; v.ampEnv=1; v.freq=120; }
-  else if(v === P.bass){ v.active=true; v.phase=0; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); v.cutoff=150+P.energy*250; }
-  else if(v === P.lead){ v.active=true; v.phase=0; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); v.cutoff=800+P.energy*1500; v.fmIndex=30+P.energy*70; }
+  if(v === P.kick){
+    v.active=true; v.phase=0; v.pitchEnv=1; v.ampEnv=1; v.freq=120;
+    // A: sidechain — duck bass/sub/pad on kick
+    P.sidechainGain = 0.3;
+  }
+  else if(v === P.bass){ v.active=true; v.phase=0; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); v.cutoff=150+P.energy*250;
+    // A: trigger sub-bass an octave below
+    triggerVoice(P.sub, midi - 12);
+  }
+  else if(v === P.sub){ v.active=true; v.phase=0; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); }
+  else if(v === P.lead){ v.active=true; v.phase=0; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); v.cutoff=800+P.energy*1500; v.fmIndex=30+P.energy*70; v.wavetable = (v.wavetable + 1) % 4; /* A: cycle wavetable per note */ }
   else if(v === P.pad){ v.active=true; v.phases=[0,0,0]; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); v.cutoff=400+P.energy*600; }
 }
 
@@ -526,18 +612,34 @@ function renderVoice(v, sr){
     v.phase += v.freq / sr; v.phase -= Math.floor(v.phase);
     var saw = polyblepSaw(v.phase, v.freq / sr);
     var f = v.filter.process(saw, v.cutoff, v.res, sr);
-    return f.low * v.ampEnv * v.gain;
+    // A: apply sidechain duck (kick ducks bass)
+    return f.low * v.ampEnv * v.gain * P.sidechainGain;
+  }
+  if(v === P.sub){
+    // A: sub-bass — pure sine, octave below bass, sidechained
+    if(!v.active) return 0;
+    v.ampEnv *= 0.9988;
+    if(v.ampEnv < 0.001){ v.active=false; return 0; }
+    v.phase += v.freq / sr; v.phase -= Math.floor(v.phase);
+    return Math.sin(2*Math.PI*v.phase) * v.ampEnv * v.gain * P.sidechainGain;
   }
   if(v === P.lead){
     v.ampEnv *= 0.9990;
     if(v.ampEnv < 0.001){ v.active=false; return 0; }
     v.phase += v.freq / sr; v.phase -= Math.floor(v.phase);
+    // A: wavetable oscillator — cycle through saw/square/psy tables per note
+    var wt = P.wavetables || buildWavetables();
+    var tableNames = [wt.saw, wt.square, wt.psy, wt.triangle];
+    var table = tableNames[v.wavetable % 4];
+    var wt_sample = wavetableOsc(table, v.phase);
     var sq = polyblepSquare(v.phase, v.freq / sr);
     // simple FM: phase modulation
     v.fmPhase += (v.freq * v.fmRatio) / sr; v.fmPhase -= Math.floor(v.fmPhase);
     var fm = Math.sin(2*Math.PI*v.fmPhase) * v.fmIndex / sr * 2 * Math.PI;
     var modulated = Math.sin(2*Math.PI*v.phase + fm);
-    var f2 = v.filter.process(modulated * 0.5 + sq * 0.5, v.cutoff, v.res, sr);
+    // A: mix wavetable + polyblep + FM (richer sound)
+    var mixed = wt_sample * 0.4 + sq * 0.3 + modulated * 0.3;
+    var f2 = v.filter.process(mixed, v.cutoff, v.res, sr);
     return f2.band * v.ampEnv * v.gain;
   }
   if(v === P.pad){
@@ -551,12 +653,17 @@ function renderVoice(v, sr){
     }
     sum /= 3;
     var fp = v.filter.process(sum, v.cutoff, v.res, sr);
+    // A: pad gets more reverb send (handled in masterProcess)
     return fp.low * v.ampEnv * v.gain;
   }
   return 0;
 }
 
 function masterProcess(x, sr){
+  // A: reverb send — send 25% of signal through Schroeder reverb
+  if(!P.reverb) P.reverb = new SchroederReverb(sr);
+  var reverbWet = P.reverb.process(x * 0.25, 0.6);
+  x = x + reverbWet * 0.3;
   // tanh saturation
   x = tanhSat(x, 0.3 + P.energy * 0.4);
   // compressor (4:1, threshold -18dB ≈ 0.126)
@@ -663,8 +770,11 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       var s = 0;
       s += renderVoice(P.kick, sr);
       s += renderVoice(P.bass, sr);
+      s += renderVoice(P.sub, sr);  // A: sub-bass
       s += renderVoice(P.lead, sr);
       s += renderVoice(P.pad, sr);
+      // A: sidechain recovery — bring gain back up exponentially after kick
+      P.sidechainGain = P.sidechainGain * 0.998 + 1.0 * 0.002;
       s = masterProcess(s, sr);
       out[0][i] = s; out[1][i] = s;
     }
@@ -737,9 +847,50 @@ function start(){
     document.getElementById("start").classList.add("hidden");
     setStatus("● live — AudioWorklet synthesis (no main-thread blocking)", true);
     drawViz();
+    setupMediaSession();  // B: Media Session API for lock screen / mobile controls
   }).catch(function(err){
     setStatus("AudioWorklet failed: " + err.message, false);
     console.error("[PSY STUDIO]", err);
+  });
+}
+
+/* B: Media Session API — lock screen controls (mobile + desktop) */
+function setupMediaSession(){
+  if(!("mediaSession" in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: "PSY STUDIO — " + STATE.mood.toUpperCase(),
+    artist: "Generative Psytrance Engine",
+    album: "PSY STUDIO",
+    artwork: [{
+      src: "data:image/svg+xml;utf8," + encodeURIComponent(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'>" +
+        "<rect width='512' height='512' fill='#050208'/>" +
+        "<text x='256' y='300' font-family='monospace' font-size='160' font-weight='900' " +
+        "text-anchor='middle' fill='#00f0c8'>PSY</text></svg>"
+      ),
+      sizes: "512x512",
+      type: "image/svg+xml"
+    }]
+  });
+  navigator.mediaSession.setActionHandler("play", function(){
+    if(WORKLET){ WORKLET.port.postMessage({type:"start"}); STATE.playing = true; }
+    navigator.mediaSession.playbackState = "playing";
+  });
+  navigator.mediaSession.setActionHandler("pause", function(){
+    if(WORKLET){ WORKLET.port.postMessage({type:"stop"}); STATE.playing = false; }
+    navigator.mediaSession.playbackState = "paused";
+  });
+  navigator.mediaSession.playbackState = "playing";
+
+  // B: iOS Safari — handle audio interruption (phone call, alarm, etc.)
+  AUDIO.addEventListener("statechange", function(){
+    if(AUDIO.state === "interrupted" || AUDIO.state === "suspended"){
+      STATE.playing = false;
+      setStatus("audio interrupted — click to resume", true);
+      document.getElementById("start").classList.remove("hidden");
+      var hint = document.getElementById("start").querySelector(".play-hint");
+      if(hint) hint.textContent = "▶ RESUME";
+    }
   });
 }
 
