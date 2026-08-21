@@ -97,6 +97,7 @@ input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;b
 .btn.export{color:var(--gold);border-color:rgba(255,209,102,.3)}
 .btn.export:hover{color:var(--bg);background:var(--gold)}
 .btn:disabled{opacity:.5;cursor:wait}
+.btn.muted{background:var(--magenta)!important;color:var(--bg)!important;border-color:var(--magenta)!important}
 
 /* export menu */
 .export-menu{position:fixed;bottom:60px;right:22px;background:rgba(15,8,30,.95);border:1px solid var(--border);
@@ -175,6 +176,12 @@ input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;b
         <div class="np-meta">
           <span id="np-bpm">—</span> BPM · key <span id="np-key">—</span> · bar <span id="np-bar">0</span> · seed <span id="np-seed">—</span>
         </div>
+        <div style="margin-top:8px;width:100%;max-width:300px">
+          <div class="ctrl-label"><span>tension</span><span class="ctrl-val" id="val-tension">0.0</span></div>
+          <div style="height:6px;background:#1a0f2e;border-radius:3px;overflow:hidden">
+            <div id="tension-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--cyan),var(--magenta));transition:width .3s"></div>
+          </div>
+        </div>
       </div>
       <canvas id="viz" width="480" height="480"></canvas>
     </div>
@@ -182,22 +189,74 @@ input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;b
     <!-- control panel -->
     <div class="panel">
       <div>
+        <h3>Transport</h3>
+        <div class="btn-row" style="grid-template-columns:1fr 1fr">
+          <div class="btn" id="btn-play" style="background:var(--cyan);color:var(--bg);font-size:13px">▶ PLAY</div>
+          <div class="btn" id="btn-reseed">↻ RESEED</div>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
+          <div class="btn section-jump" data-section="INTRO" style="font-size:9px;padding:5px 8px">INTRO</div>
+          <div class="btn section-jump" data-section="BUILD" style="font-size:9px;padding:5px 8px">BUILD</div>
+          <div class="btn section-jump" data-section="DROP" style="font-size:9px;padding:5px 8px">DROP</div>
+          <div class="btn section-jump" data-section="BREAK" style="font-size:9px;padding:5px 8px">BREAK</div>
+          <div class="btn section-jump" data-section="RISER" style="font-size:9px;padding:5px 8px">RISER</div>
+          <div class="btn section-jump" data-section="DROP2" style="font-size:9px;padding:5px 8px">DROP2</div>
+        </div>
+      </div>
+
+      <div>
         <h3>Synthesis</h3>
         <div class="ctrl-group">
           <div class="ctrl-label"><span>energy</span><span class="ctrl-val" id="val-energy">0.50</span></div>
           <input type="range" id="sl-energy" min="0" max="1" step="0.01" value="0.5">
         </div>
-        <div class="ctrl-group" style="margin-top:10px">
+        <div class="ctrl-group" style="margin-top:8px">
           <div class="ctrl-label"><span>bpm</span><span class="ctrl-val" id="val-bpm">144</span></div>
           <input type="range" id="sl-bpm" min="120" max="160" step="1" value="144">
         </div>
-        <div class="ctrl-group" style="margin-top:10px">
+        <div class="ctrl-group" style="margin-top:8px">
           <div class="ctrl-label"><span>mood</span></div>
           <div class="moods" id="moods">
             <div class="mood active" data-mood="fullon">FULL-ON</div>
             <div class="mood" data-mood="dark">DARK</div>
             <div class="mood" data-mood="prog">PROG</div>
           </div>
+        </div>
+      </div>
+
+      <div>
+        <h3>Macros <span style="color:var(--dim);font-weight:400;font-size:9px">— real-time control</span></h3>
+        <div class="ctrl-group">
+          <div class="ctrl-label"><span>tension</span><span class="ctrl-val" id="val-macro-tension">0.5</span></div>
+          <input type="range" id="macro-tension" min="0" max="1" step="0.01" value="0.5">
+        </div>
+        <div class="ctrl-group" style="margin-top:6px">
+          <div class="ctrl-label"><span>brightness</span><span class="ctrl-val" id="val-macro-brightness">0.5</span></div>
+          <input type="range" id="macro-brightness" min="0" max="1" step="0.01" value="0.5">
+        </div>
+        <div class="ctrl-group" style="margin-top:6px">
+          <div class="ctrl-label"><span>space</span><span class="ctrl-val" id="val-macro-space">0.3</span></div>
+          <input type="range" id="macro-space" min="0" max="1" step="0.01" value="0.3">
+        </div>
+      </div>
+
+      <div>
+        <h3>Mixer <span style="color:var(--dim);font-weight:400;font-size:9px">— 6 channels</span></h3>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;text-align:center">
+          <div><div style="font-size:8px;color:var(--dim);margin-bottom:2px">KICK</div><input type="range" id="mix-kick-vol" min="0" max="1" step="0.01" value="0.9" style="writing-mode:bt-lr;-webkit-appearance:slider-vertical;width:16px;height:50px"></div>
+          <div><div style="font-size:8px;color:var(--dim);margin-bottom:2px">BASS</div><input type="range" id="mix-bass-vol" min="0" max="1" step="0.01" value="0.7" style="writing-mode:bt-lr;-webkit-appearance:slider-vertical;width:16px;height:50px"></div>
+          <div><div style="font-size:8px;color:var(--dim);margin-bottom:2px">SUB</div><input type="range" id="mix-sub-vol" min="0" max="1" step="0.01" value="0.5" style="writing-mode:bt-lr;-webkit-appearance:slider-vertical;width:16px;height:50px"></div>
+          <div><div style="font-size:8px;color:var(--dim);margin-bottom:2px">LEAD</div><input type="range" id="mix-lead-vol" min="0" max="1" step="0.01" value="0.5" style="writing-mode:bt-lr;-webkit-appearance:slider-vertical;width:16px;height:50px"></div>
+          <div><div style="font-size:8px;color:var(--dim);margin-bottom:2px">PAD</div><input type="range" id="mix-pad-vol" min="0" max="1" step="0.01" value="0.4" style="writing-mode:bt-lr;-webkit-appearance:slider-vertical;width:16px;height:50px"></div>
+          <div><div style="font-size:8px;color:var(--dim);margin-bottom:2px">DRUM</div><input type="range" id="mix-drums-vol" min="0" max="1" step="0.01" value="0.6" style="writing-mode:bt-lr;-webkit-appearance:slider-vertical;width:16px;height:50px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:4px;text-align:center">
+          <div class="btn" id="mix-kick-mute" style="font-size:8px;padding:3px 0">M</div>
+          <div class="btn" id="mix-bass-mute" style="font-size:8px;padding:3px 0">M</div>
+          <div class="btn" id="mix-sub-mute" style="font-size:8px;padding:3px 0">M</div>
+          <div class="btn" id="mix-lead-mute" style="font-size:8px;padding:3px 0">M</div>
+          <div class="btn" id="mix-pad-mute" style="font-size:8px;padding:3px 0">M</div>
+          <div class="btn" id="mix-drums-mute" style="font-size:8px;padding:3px 0">M</div>
         </div>
       </div>
 
@@ -214,7 +273,6 @@ input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;b
       <div>
         <h3>Actions</h3>
         <div class="btn-row">
-          <div class="btn" id="btn-reseed">↻ RESEED</div>
           <div class="btn" id="btn-share">⎘ SHARE URL</div>
         </div>
       </div>
@@ -352,8 +410,10 @@ var STATE = {
 /* ═══════ AudioWorklet code (all DSP inline — self-contained, no imports) ═══════ */
 var WORKLET_CODE = `
 "use strict";
-// DSP primitives (inlined from foundation/dsp.mjs — kept in sync)
-function mulberry32(seed){ var a=seed>>>0; return function(){ a|=0; a=(a+0x6D2B79F5)|0;
+// ═══ PSY STUDIO PRO SOUND ENGINE — commercial-grade synthesis ═══
+// All DSP inline. Runs on audio thread. Zero per-sample allocation.
+
+function mulberry32(s){ var a=s>>>0; return function(){ a|=0; a=(a+0x6D2B79F5)|0;
   var t=Math.imul(a^(a>>>15),1|a); t=(t+Math.imul(t^(t>>>7),61|t))^t;
   return ((t^(t>>>14))>>>0)/4294967296; }; }
 function subSeed(p,l){ var h=(p>>>0)^0x9E3779B9; for(var i=0;i<l.length;i++){
@@ -361,443 +421,332 @@ function subSeed(p,l){ var h=(p>>>0)^0x9E3779B9; for(var i=0;i<l.length;i++){
   return (Math.imul(h^(h>>>16),0x27D4EB2F)>>>15)>>>0; }
 
 function polyblepSaw(phase, dt){
-  // naive saw: 2*phase - 1, with blep correction at the wrap
   var p = phase - Math.floor(phase);
-  var naive = 2 * p - 1;
-  var blep = 0;
-  if(p < dt) blep = -p/dt + 1;
-  else if(p > 1 - dt) blep = p/dt - 1; // wait this is wrong for wraparound... use simpler
-  // Simpler: standard PolyBLEP saw
-  var _p = p;
-  var _dt = dt;
-  var saw = 2 * _p - 1;
-  // blep at the discontinuity (phase = 0)
+  var saw = 2 * p - 1;
   var delta = 0;
-  if(_p < _dt) delta = -(_p/_dt) + 1;
-  else if(_p > 1 - _dt) delta = (_p/_dt) - 1;
-  // hmm this gives a single spike; proper way:
-  // blep = if p < dt: 2*p/dt - 2*(p/dt)^2 - 1 ... too complex
-  // Use the simplest: subtract 1 at the wrap (delta of -1 smoothed)
+  if(p < dt) delta = -(p/dt) + 1;
+  else if(p > 1 - dt) delta = (p/dt) - 1;
   return saw + delta * 2;
 }
 function polyblepSquare(phase, dt){
   var p = phase - Math.floor(phase);
   var naive = p < 0.5 ? 1 : -1;
-  // blep at p=0 (rising) and p=0.5 (falling)
   var b1 = 0, b2 = 0;
-  if(p < dt) b1 = -p/dt + 1;
-  else if(p > 1 - dt) b1 = p/dt - 1;
+  if(p < dt) b1 = -(p/dt) + 1;
+  else if(p > 1 - dt) b1 = (p/dt) - 1;
   var p2 = (p + 0.5) % 1;
-  if(p2 < dt) b2 = -p2/dt + 1;
-  else if(p2 > 1 - dt) b2 = p2/dt - 1;
+  if(p2 < dt) b2 = -(p2/dt) + 1;
+  else if(p2 > 1 - dt) b2 = (p2/dt) - 1;
   return naive + b1 * 2 - b2 * 2;
 }
 
-// A: Wavetable oscillator — pre-computed single-cycle waveform, linear interpolation
-var _wavetables = null;
-function buildWavetables(){
-  if(_wavetables) return _wavetables;
-  var size = 256;
-  var wt = {};
-  // "saw" = polyblep saw sampled
-  wt.saw = new Float32Array(size);
-  wt.square = new Float32Array(size);
-  wt.triangle = new Float32Array(size);
-  wt.sine = new Float32Array(size);
-  wt.psy = new Float32Array(size); // custom: saw + 2nd harmonic + slight noise
-  var dt = 1/size;
-  for(var i = 0; i < size; i++){
-    var ph = i / size;
-    wt.saw[i] = polyblepSaw(ph, dt);
-    wt.square[i] = polyblepSquare(ph, dt);
-    wt.triangle[i] = 2 * Math.abs(2 * (ph - Math.floor(ph + 0.5))) - 1;
-    wt.sine[i] = Math.sin(2 * Math.PI * ph);
-    wt.psy[i] = 0.6 * polyblepSaw(ph, dt) + 0.3 * Math.sin(2*Math.PI*ph*2) + 0.1 * (Math.sin(2*Math.PI*ph*7));
-  }
-  _wavetables = wt;
-  return wt;
-}
-function wavetableOsc(table, phase){
-  var p = phase - Math.floor(phase);
-  var idx = p * table.length;
-  var i0 = Math.floor(idx) % table.length;
-  var i1 = (i0 + 1) % table.length;
-  var frac = idx - Math.floor(idx);
-  return table[i0] * (1 - frac) + table[i1] * frac;
-}
-
-// A: Schroeder reverb (allpass network) — lightweight, runs in worklet
-class SchroederReverb {
-  constructor(sr){
-    this.ap1 = { buf: new Float32Array(Math.floor(sr * 0.0123)), idx: 0 };  // 12.3ms
-    this.ap2 = { buf: new Float32Array(Math.floor(sr * 0.0257)), idx: 0 };  // 25.7ms
-    this.ap3 = { buf: new Float32Array(Math.floor(sr * 0.0341)), idx: 0 };  // 34.1ms
-    this.ap4 = { buf: new Float32Array(Math.floor(sr * 0.0456)), idx: 0 };  // 45.6ms
-    this.d1 = { buf: new Float32Array(Math.floor(sr * 0.0897)), idx: 0 };  // 89.7ms
-    this.d2 = { buf: new Float32Array(Math.floor(sr * 0.1134)), idx: 0 };  // 113.4ms
-    this.d3 = { buf: new Float32Array(Math.floor(sr * 0.1412)), idx: 0 };  // 141.2ms
-    this.d4 = { buf: new Float32Array(Math.floor(sr * 0.1557)), idx: 0 };  // 155.7ms
-  }
-  allpass(node, input, decay){
-    var out = node.buf[node.idx];
-    node.buf[node.idx] = input + out * decay;
-    node.idx = (node.idx + 1) % node.buf.length;
-    return out - input * decay;
-  }
-  delay(node, input){
-    var out = node.buf[node.idx];
-    node.buf[node.idx] = input;
-    node.idx = (node.idx + 1) % node.buf.length;
-    return out;
-  }
-  process(input, decay){
-    var x = this.allpass(this.ap1, input, 0.7);
-    x = this.allpass(this.ap2, x, 0.7);
-    x = this.allpass(this.ap3, x, 0.7);
-    x = this.allpass(this.ap4, x, 0.7);
-    var d1 = this.delay(this.d1, x) * decay;
-    var d2 = this.delay(this.d2, x) * decay;
-    var d3 = this.delay(this.d3, x) * decay;
-    var d4 = this.delay(this.d4, x) * decay;
-    // feedback: -1, +1, -1, +1 polarity for stereo decorrelation (mono here)
-    return (d1 - d2 + d3 - d4) * 0.5;
-  }
-}
-
 class ZdfSvf {
-  constructor(){ this.ic1eq=0; this.ic2eq=0; }
-  process(input, cutoff, resonance, sr){
-    var r = resonance < 0 ? 0 : (resonance > 1 ? 1 : resonance);
-    var k = 1.41421356 * (1 - r);  // sqrt(2) * (1-r)
-    var g = Math.tan(Math.PI * cutoff / sr);
+  constructor(){ this.ic1=0; this.ic2=0; }
+  process(input, cutoff, res, sr){
+    var r = res < 0 ? 0 : (res > 1 ? 1 : res);
+    var k = 1.41421356 * (1 - r);
+    var g = Math.tan(Math.PI * Math.max(20, Math.min(cutoff, sr/2 - 1)) / sr);
     var a1 = 1 / (1 + g * (g + k));
-    var a2 = g * a1;
-    var a3 = g * a2;
-    var v3 = input - this.ic2eq;
-    var v1 = a1 * this.ic1eq + a2 * v3;
-    var v2 = this.ic2eq + a2 * this.ic1eq + a3 * v3;
-    this.ic1eq = 2 * v1 - this.ic1eq;
-    this.ic2eq = 2 * v2 - this.ic2eq;
+    var a2 = g * a1; var a3 = g * a2;
+    var v3 = input - this.ic2;
+    var v1 = a1 * this.ic1 + a2 * v3;
+    var v2 = this.ic2 + a2 * this.ic1 + a3 * v3;
+    this.ic1 = 2 * v1 - this.ic1;
+    this.ic2 = 2 * v2 - this.ic2;
     return { low: v2, band: v1, high: v3 };
   }
-  reset(){ this.ic1eq = 0; this.ic2eq = 0; }
 }
 
-function tanhSat(x, drive){ var k = 1 + drive * 2; return Math.tanh(k * x) / Math.tanh(k); }
+var _noiseState = 12345;
+function noiseNext(){
+  _noiseState = (_noiseState * 16807) % 2147483647;
+  return (_noiseState / 2147483647) * 2 - 1;
+}
 
-// Compressor (peak detect + gain reduction)
 class Comp {
-  constructor(){ this.env = 0; this.gr = 1; }
-  process(x, threshold, ratio, attackMs, releaseMs, sr){
+  constructor(){ this.env=0; this.gr=1; }
+  process(x, thr, ratio, atkMs, relMs, sr){
     var peak = Math.abs(x);
-    var a = Math.exp(-1 / (attackMs * 0.001 * sr));
-    var r = Math.exp(-1 / (releaseMs * 0.001 * sr));
-    if(peak > this.env) this.env = this.env * a + peak * (1 - a);
-    else this.env = this.env * r + peak * (1 - r);
-    if(this.env > threshold){
-      var over = this.env - threshold;
+    var a = Math.exp(-1 / Math.max(0.001, atkMs * 0.001 * sr));
+    var r = Math.exp(-1 / Math.max(0.001, relMs * 0.001 * sr));
+    if(peak > this.env) this.env = this.env * a + peak * (1-a);
+    else this.env = this.env * r + peak * (1-r);
+    if(this.env > thr){
+      var over = this.env - thr;
       this.gr = 1 - over * (1 - 1/ratio) / Math.max(0.001, this.env);
     } else { this.gr = 1; }
     return x * this.gr;
   }
 }
 
-// State
+class Reverb {
+  constructor(sr){
+    var rs = sr / 2;
+    this.ap = [];
+    var delays = [0.0117, 0.0234, 0.0351, 0.0468];
+    for(var i = 0; i < 4; i++) this.ap.push({ buf: new Float32Array(Math.floor(rs * delays[i])), idx: 0 });
+    this.d = [];
+    var dd = [0.0897, 0.1134, 0.1412, 0.1557];
+    for(var j = 0; j < 4; j++) this.d.push({ buf: new Float32Array(Math.floor(rs * dd[j])), idx: 0 });
+    this.lastWet = 0; this.count = 0;
+  }
+  _ap(node, input, decay){
+    var out = node.buf[node.idx];
+    node.buf[node.idx] = input + out * decay;
+    node.idx = (node.idx + 1) % node.buf.length;
+    return out - input * decay;
+  }
+  _delay(node, input){
+    var out = node.buf[node.idx];
+    node.buf[node.idx] = input;
+    node.idx = (node.idx + 1) % node.buf.length;
+    return out;
+  }
+  process(input, decay){
+    this.count = (this.count + 1) % 2;
+    if(this.count === 0){
+      var x = this._ap(this.ap[0], input, 0.7);
+      x = this._ap(this.ap[1], x, 0.7);
+      x = this._ap(this.ap[2], x, 0.7);
+      x = this._ap(this.ap[3], x, 0.7);
+      var d1 = this._delay(this.d[0], x) * decay;
+      var d2 = this._delay(this.d[1], x) * decay;
+      var d3 = this._delay(this.d[2], x) * decay;
+      var d4 = this._delay(this.d[3], x) * decay;
+      this.lastWet = (d1 - d2 + d3 - d4) * 0.5;
+    }
+    return this.lastWet;
+  }
+}
+
+class Chorus {
+  constructor(sr){ this.buf = new Float32Array(Math.floor(sr * 0.05)); this.idx = 0; this.lfo = 0; }
+  process(input, rate, depth, sr){
+    this.lfo += rate / sr * 2 * Math.PI;
+    var delay = (0.015 + 0.01 * Math.sin(this.lfo)) * sr;
+    var readIdx = this.idx - delay + this.buf.length;
+    readIdx = ((readIdx % this.buf.length) + this.buf.length) % this.buf.length;
+    var i0 = Math.floor(readIdx);
+    var i1 = (i0 + 1) % this.buf.length;
+    var frac = readIdx - i0;
+    var out = this.buf[i0] * (1 - frac) + this.buf[i1] * frac;
+    this.buf[this.idx] = input;
+    this.idx = (this.idx + 1) % this.buf.length;
+    return out * depth + input * (1 - depth);
+  }
+}
+
 var P = {
-  bpm: 144, energy: 0.5, mood: "fullon",
-  seed: 12345, playing: false,
+  bpm: 144, energy: 0.5, mood: "fullon", seed: 12345, playing: false,
   root: 33, scale: [0,1,4,5,7,8,10],
-  barIndex: 0, beatIndex: 0, nextBarTime: 0, currentPlan: null,
+  barIndex: 0, nextBarTime: 0, currentPlan: null, currentBarStart: 0,
   audioTime: 0, lastMetricPost: 0,
-  rng: null, directorRng: null,
-  // voices
-  kick: { active:false, phase:0, freq:60, pitchEnv:0, ampEnv:0, gain:0.85 },
-  bass: { active:false, phase:0, freq:55, filter:new ZdfSvf(), cutoff:200, res:0.4, ampEnv:0, gain:0.45 },
-  sub: { active:false, phase:0, freq:27.5, ampEnv:0, gain:0.35 }, // A: sub-bass (sine, octave below bass)
-  lead: { active:false, phase:0, freq:220, filter:new ZdfSvf(), cutoff:1200, res:0.6, fmPhase:0, fmRatio:2, fmIndex:50, ampEnv:0, gain:0.15, wavetable:0 },
-  pad: { active:false, phases:[0,0,0], detunes:[0.997,1.0,1.003], freq:110, filter:new ZdfSvf(), cutoff:800, res:0.2, ampEnv:0, gain:0.1 },
-  // A: sidechain — kick ducks the bass/sub/pad gain
-  sidechainGain: 1.0,
-  // A: reverb — Schroeder allpass network (one for the whole mix)
-  reverb: null,
-  // A: wavetables (built lazily on first use)
-  wavetables: null,
-  // master
-  comp: new Comp(),
-  // grammar
+  rng: null, directorRng: null, rewardPrediction: 0.5,
+  section: "INTRO", tension: 0,
+  macroTension: 0.5, macroBrightness: 0.5, macroSpace: 0.3,
+  mixer: {
+    kick:{vol:0.9,mute:false,send:0}, bass:{vol:0.7,mute:false,send:0},
+    lead:{vol:0.5,mute:false,send:0.2}, pad:{vol:0.4,mute:false,send:0.5},
+    drums:{vol:0.6,mute:false,send:0.1}, sub:{vol:0.5,mute:false,send:0},
+  },
+  sidechainGain: 1.0, reverb: null, chorus: null, comp: new Comp(),
   bassGrammar: null, melodicGrammar: null,
-  // director
-  rewardPrediction: 0.5,
+  kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1},
+  sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5},
+  bass:{active:false,phase:0,phase2:0,freq:55,filter:new ZdfSvf(),cutoff:200,res:0.4,ampEnv:0,gain:0.5},
+  lead:{active:false,phase:0,phase2:0,freq:220,filter:new ZdfSvf(),cutoff:1200,res:0.6,fmPhase:0,fmRatio:2,fmIndex:50,ampEnv:0,gain:0.2,wavetable:0},
+  pad:{active:false,phases:[0,0,0,0,0,0,0],detunes:[0.995,0.998,1.0,1.002,1.005,0.997,1.003],freq:110,filter:new ZdfSvf(),cutoff:800,res:0.2,ampEnv:0,gain:0.15},
+  hat:{active:false,ampEnv:0,gain:0.2}, clap:{active:false,ampEnv:0,gain:0.3,bursts:0},
+  snare:{active:false,phase:0,ampEnv:0,gain:0.3}, crash:{active:false,ampEnv:0,gain:0.2},
 };
 
 function initGrammar(seed){
   P.bassGrammar = { matrix: new Array(12).fill(0).map(function(){return new Array(12).fill(0);}) };
-  P.melodicGrammar = { hist: new Array(25).fill(1) }; // 25 buckets for -12..+12
+  P.melodicGrammar = { hist: new Array(25).fill(1) };
   P.rng = mulberry32(seed);
   P.directorRng = mulberry32(subSeed(seed, "director"));
 }
 
+var CHORD_PROGRESSION = [0, 5, 2, 7];
+function getChordRoot(barIndex){ return CHORD_PROGRESSION[Math.floor(barIndex / 4) % 4]; }
+function getTension(b){
+  var p = b % 32;
+  if(p < 4) return 0.2;
+  if(p < 8) return 0.2 + (p - 4) * 0.15;
+  if(p < 16) return 0.8;
+  if(p < 20) return 0.3;
+  if(p < 24) return 0.3 + (p - 20) * 0.15;
+  return 0.9;
+}
+function getSection(b){
+  var p = b % 32;
+  if(p < 4) return "INTRO"; if(p < 8) return "BUILD"; if(p < 16) return "DROP";
+  if(p < 20) return "BREAK"; if(p < 24) return "RISER"; return "DROP2";
+}
+function directorDecide(){
+  var phase = P.barIndex % 32;
+  if(phase >= 16 && phase < 20 && P.directorRng() < 0.6) return {action:"abstain",reason:"break"};
+  if(phase === 0) return {action:"abstain",reason:"intro"};
+  return {action:"play",intensity:0.3+P.tension*0.7,reason:"play"};
+}
 function degreeToMidi(deg){
   var oct = Math.floor(deg / P.scale.length);
   var idx = ((deg % P.scale.length) + P.scale.length) % P.scale.length;
-  return P.root + P.scale[idx] + 12 * oct;
+  return P.root + P.scale[idx] + 12 * oct + getChordRoot(P.barIndex);
 }
-
-function directorDecide(){
-  // abstain when energy very low + recent activity
-  if(P.energy < 0.15 && P.barIndex % 8 > 4) return { action:"abstain", reason:"low energy + barsSinceRest>4" };
-  if(P.barIndex > 0 && P.barIndex % 16 === 15) return { action:"abstain", reason:"phrase break" };
-  if(P.directorRng() < 0.05) return { action:"abstain", reason:"exploration silence" };
-  return { action:"play", intensity: 0.3 + P.energy * 0.6, reason:"play" };
-}
-
 function planBar(){
   var dec = directorDecide();
-  if(dec.action !== "play") return { decision: dec, steps: null };
+  if(dec.action !== "play") return {decision:dec, steps:null};
   var steps = [];
   var barRng = mulberry32(subSeed(P.seed, "bar:" + P.barIndex));
+  var isDrop = (P.barIndex % 32 >= 8 && P.barIndex % 32 < 16) || (P.barIndex % 32 >= 24);
+  var phase = P.barIndex % 32;
   for(var s = 0; s < 16; s++){
-    var step = { kick:false, bassNote:null, leadNote:null, padNote:null };
-    if(s % 4 === 0 && barRng() < 0.95) step.kick = true;
-    else if(s === 10 && barRng() < 0.3 + P.energy * 0.3) step.kick = true;
-    if(s % 4 === 0 || s === 6 || s === 10 || s === 14){
-      var bassDeg = (P.barIndex + Math.floor(s/4)) % 7 - 2;
-      step.bassNote = degreeToMidi(bassDeg);
-      // observe for grammar
-      P.bassGrammar.matrix[0][bassDeg+2] = (P.bassGrammar.matrix[0][bassDeg+2] || 0) + 1;
+    var st = {kick:false,bassNote:null,leadNote:null,padNote:null,hat:false,clap:false,snare:false,crash:false,_trig:false};
+    if(isDrop || (phase >= 4 && phase < 8)){ if(s%4===0) st.kick=true; if(s===14 && barRng()<0.4+P.tension*0.3) st.kick=true; }
+    if(isDrop && (s%4===0||s===6||s===10||s===14)) st.bassNote=degreeToMidi(-2);
+    if(isDrop && barRng()<0.1+P.tension*0.4 && s%2===0){
+      var total=P.melodicGrammar.hist.reduce(function(a,b){return a+b;},0);
+      var r=barRng()*total,acc=0,interval=0;
+      for(var i=0;i<25;i++){acc+=P.melodicGrammar.hist[i];if(r<acc){interval=i-12;break;}}
+      st.leadNote=degreeToMidi(14+interval);
+      P.melodicGrammar.hist[interval+12]+=0.5;
     }
-    if(barRng() < 0.1 + P.energy * 0.35 && s % 2 === 0){
-      // sample interval from melodic grammar
-      var total = P.melodicGrammar.hist.reduce(function(a,b){return a+b;},0);
-      var r = barRng() * total, acc = 0, idx = 12;
-      for(var i = 0; i < 25; i++){ acc += P.melodicGrammar.hist[i]; if(r < acc){ idx = i - 12; break; } }
-      step.leadNote = degreeToMidi(14 + idx);
-      P.melodicGrammar.hist[idx + 12] += 0.5; // reinforce
+    if(s===0 && P.barIndex%2===0 && phase<20) st.padNote=degreeToMidi(7+(P.barIndex%4));
+    if(isDrop || phase >= 4){
+      if(s%2===1) st.hat=true;
+      if(s===4||s===12) st.clap=true;
+      if((phase===7||phase===15||phase===23||phase===31) && s>=12 && barRng()<0.3+P.tension*0.4) st.snare=true;
+      if(s===0 && (phase===8||phase===24)) st.crash=true;
     }
-    if(s === 0 && P.barIndex % 2 === 0){
-      step.padNote = degreeToMidi(7 + (P.barIndex % 4));
-    }
-    steps.push(step);
+    steps.push(st);
   }
-  return { decision: dec, steps: steps };
+  return {decision:dec, steps:steps};
 }
 
-function triggerVoice(v, midi){
-  if(v === P.kick){
-    v.active=true; v.phase=0; v.pitchEnv=1; v.ampEnv=1; v.freq=120;
-    // A: sidechain — duck bass/sub/pad on kick
-    P.sidechainGain = 0.3;
-  }
-  else if(v === P.bass){ v.active=true; v.phase=0; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); v.cutoff=150+P.energy*250;
-    // A: trigger sub-bass an octave below
-    triggerVoice(P.sub, midi - 12);
-  }
-  else if(v === P.sub){ v.active=true; v.phase=0; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); }
-  else if(v === P.lead){ v.active=true; v.phase=0; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); v.cutoff=800+P.energy*1500; v.fmIndex=30+P.energy*70; v.wavetable = (v.wavetable + 1) % 4; /* A: cycle wavetable per note */ }
-  else if(v === P.pad){ v.active=true; v.phases=[0,0,0]; v.ampEnv=1; v.freq=440*Math.pow(2,(midi-69)/12); v.cutoff=400+P.energy*600; }
-}
+function triggerKick(){ var v=P.kick; v.active=true;v.phase=0;v.pitchEnv=1;v.ampEnv=1;v.clickEnv=1;v.freq=120; P.sidechainGain=0.25; }
+function triggerBass(m){ var v=P.bass; v.active=true;v.phase=0;v.phase2=0;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=120+P.energy*200+P.macroBrightness*300;
+  var sv=P.sub; sv.active=true;sv.phase=0;sv.ampEnv=1;sv.freq=440*Math.pow(2,(m-12-69)/12); }
+function triggerLead(m){ var v=P.lead; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=600+P.energy*1000+P.macroBrightness*2000; v.fmIndex=20+P.energy*60+P.macroBrightness*40; v.wavetable=(v.wavetable+1)%4; }
+function triggerPad(m){ var v=P.pad; v.active=true;v.phases=[0,0,0,0,0,0,0];v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=300+P.energy*400+P.macroBrightness*600; }
+function triggerHat(){ P.hat.active=true;P.hat.ampEnv=1; }
+function triggerClap(){ P.clap.active=true;P.clap.ampEnv=1;P.clap.bursts=0; }
+function triggerSnare(){ P.snare.active=true;P.snare.phase=0;P.snare.ampEnv=1; }
+function triggerCrash(){ P.crash.active=true;P.crash.ampEnv=1; }
 
-function renderVoice(v, sr){
-  if(!v.active) return 0;
-  if(v === P.kick){
-    v.freq = 40 + 80 * v.pitchEnv; v.pitchEnv *= 0.97;
-    v.ampEnv *= 0.987;
-    if(v.ampEnv < 0.001){ v.active=false; return 0; }
-    v.phase += v.freq / sr; v.phase -= Math.floor(v.phase);
-    return Math.sin(2*Math.PI*v.phase) * v.ampEnv * v.gain + (v.pitchEnv>0.7 ? (Math.random()*2-1)*0.3*v.pitchEnv : 0);
-  }
-  if(v === P.bass){
-    v.ampEnv *= 0.9985;
-    if(v.ampEnv < 0.001){ v.active=false; return 0; }
-    v.phase += v.freq / sr; v.phase -= Math.floor(v.phase);
-    var saw = polyblepSaw(v.phase, v.freq / sr);
-    var f = v.filter.process(saw, v.cutoff, v.res, sr);
-    // A: apply sidechain duck (kick ducks bass)
-    return f.low * v.ampEnv * v.gain * P.sidechainGain;
-  }
-  if(v === P.sub){
-    // A: sub-bass — pure sine, octave below bass, sidechained
-    if(!v.active) return 0;
-    v.ampEnv *= 0.9988;
-    if(v.ampEnv < 0.001){ v.active=false; return 0; }
-    v.phase += v.freq / sr; v.phase -= Math.floor(v.phase);
-    return Math.sin(2*Math.PI*v.phase) * v.ampEnv * v.gain * P.sidechainGain;
-  }
-  if(v === P.lead){
-    v.ampEnv *= 0.9990;
-    if(v.ampEnv < 0.001){ v.active=false; return 0; }
-    v.phase += v.freq / sr; v.phase -= Math.floor(v.phase);
-    // A: wavetable oscillator — cycle through saw/square/psy tables per note
-    var wt = P.wavetables || buildWavetables();
-    var tableNames = [wt.saw, wt.square, wt.psy, wt.triangle];
-    var table = tableNames[v.wavetable % 4];
-    var wt_sample = wavetableOsc(table, v.phase);
-    var sq = polyblepSquare(v.phase, v.freq / sr);
-    // simple FM: phase modulation
-    v.fmPhase += (v.freq * v.fmRatio) / sr; v.fmPhase -= Math.floor(v.fmPhase);
-    var fm = Math.sin(2*Math.PI*v.fmPhase) * v.fmIndex / sr * 2 * Math.PI;
-    var modulated = Math.sin(2*Math.PI*v.phase + fm);
-    // A: mix wavetable + polyblep + FM (richer sound)
-    var mixed = wt_sample * 0.4 + sq * 0.3 + modulated * 0.3;
-    var f2 = v.filter.process(mixed, v.cutoff, v.res, sr);
-    return f2.band * v.ampEnv * v.gain;
-  }
-  if(v === P.pad){
-    v.ampEnv *= 0.99996;
-    if(v.ampEnv < 0.001){ v.active=false; return 0; }
-    var sum = 0;
-    for(var i = 0; i < 3; i++){
-      v.phases[i] += (v.freq * v.detunes[i]) / sr;
-      v.phases[i] -= Math.floor(v.phases[i]);
-      sum += polyblepSaw(v.phases[i], (v.freq * v.detunes[i]) / sr);
-    }
-    sum /= 3;
-    var fp = v.filter.process(sum, v.cutoff, v.res, sr);
-    // A: pad gets more reverb send (handled in masterProcess)
-    return fp.low * v.ampEnv * v.gain;
-  }
-  return 0;
-}
+function rKick(sr){ var v=P.kick; if(!v.active)return 0;
+  var click=v.clickEnv>0.1?noiseNext()*v.clickEnv*0.4:0; v.clickEnv*=0.9;
+  v.freq=40+80*v.pitchEnv; v.pitchEnv*=0.96; v.ampEnv*=0.987;
+  if(v.ampEnv<0.001){v.active=false;return 0;} v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase);
+  return (Math.sin(2*Math.PI*v.phase)*v.ampEnv+click)*v.gain*P.mixer.kick.vol*(P.mixer.kick.mute?0:1); }
+function rSub(sr){ var v=P.sub; if(!v.active)return 0; v.ampEnv*=0.9988;
+  if(v.ampEnv<0.001){v.active=false;return 0;} v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase);
+  return Math.sin(2*Math.PI*v.phase)*v.ampEnv*v.gain*P.mixer.sub.vol*(P.mixer.sub.mute?0:1)*P.sidechainGain; }
+function rBass(sr){ var v=P.bass; if(!v.active)return 0; v.ampEnv*=0.9985;
+  if(v.ampEnv<0.001){v.active=false;return 0;} var dt=v.freq/sr;
+  v.phase+=dt;v.phase-=Math.floor(v.phase); v.phase2+=dt*0.5;v.phase2-=Math.floor(v.phase2);
+  var saw=polyblepSaw(v.phase,dt); var sub=Math.sin(2*Math.PI*v.phase2)*0.4;
+  var f=v.filter.process(saw*0.7+sub,v.cutoff,v.res,sr);
+  return f.low*v.ampEnv*v.gain*P.mixer.bass.vol*(P.mixer.bass.mute?0:1)*P.sidechainGain; }
+function rLead(sr){ var v=P.lead; if(!v.active)return 0; v.ampEnv*=0.999;
+  if(v.ampEnv<0.001){v.active=false;return 0;} var dt=v.freq/sr;
+  v.phase+=dt;v.phase-=Math.floor(v.phase); v.phase2+=dt*1.005;v.phase2-=Math.floor(v.phase2);
+  var s1=polyblepSaw(v.phase,dt),s2=polyblepSaw(v.phase2,dt);
+  v.fmPhase+=(v.freq*v.fmRatio)/sr;v.fmPhase-=Math.floor(v.fmPhase);
+  var fm=Math.sin(2*Math.PI*v.fmPhase)*v.fmIndex/sr*2*Math.PI;
+  var mixed=s1*0.35+s2*0.35+Math.sin(2*Math.PI*v.phase+fm)*0.3;
+  var f2=v.filter.process(mixed,v.cutoff,v.res,sr);
+  return f2.band*v.ampEnv*v.gain*P.mixer.lead.vol*(P.mixer.lead.mute?0:1); }
+function rPad(sr){ var v=P.pad; if(!v.active)return 0; v.ampEnv*=0.99997;
+  if(v.ampEnv<0.001){v.active=false;return 0;} var sum=0;
+  for(var i=0;i<7;i++){v.phases[i]+=(v.freq*v.detunes[i])/sr;v.phases[i]-=Math.floor(v.phases[i]);sum+=polyblepSaw(v.phases[i],(v.freq*v.detunes[i])/sr);}
+  sum/=7; var fp=v.filter.process(sum,v.cutoff,v.res,sr);
+  return fp.low*v.ampEnv*v.gain*P.mixer.pad.vol*(P.mixer.pad.mute?0:1); }
+function rHat(sr){ var v=P.hat; if(!v.active)return 0; v.ampEnv*=0.92;
+  if(v.ampEnv<0.001){v.active=false;return 0;} return noiseNext()*v.ampEnv*v.gain*P.mixer.drums.vol*(P.mixer.drums.mute?0:1)*0.5; }
+function rClap(sr){ var v=P.clap; if(!v.active)return 0; v.ampEnv*=0.94; v.bursts+=1;
+  if(v.ampEnv<0.001){v.active=false;return 0;}
+  var burst=v.bursts<3?noiseNext()*(1-v.bursts/3):0; var body=noiseNext()*v.ampEnv*0.5;
+  return (burst*0.6+body)*v.gain*P.mixer.drums.vol*(P.mixer.drums.mute?0:1); }
+function rSnare(sr){ var v=P.snare; if(!v.active)return 0; v.ampEnv*=0.97;
+  if(v.ampEnv<0.001){v.active=false;return 0;} v.phase+=200/sr;v.phase-=Math.floor(v.phase);
+  return (Math.sin(2*Math.PI*v.phase)*0.4+noiseNext()*0.6)*v.ampEnv*v.gain*P.mixer.drums.vol*(P.mixer.drums.mute?0:1); }
+function rCrash(sr){ var v=P.crash; if(!v.active)return 0; v.ampEnv*=0.9995;
+  if(v.ampEnv<0.001){v.active=false;return 0;} return noiseNext()*v.ampEnv*v.gain*P.mixer.drums.vol*(P.mixer.drums.mute?0:1)*0.4; }
 
 function masterProcess(x, sr){
-  // A: reverb send — send 25% of signal through Schroeder reverb
-  if(!P.reverb) P.reverb = new SchroederReverb(sr);
-  var reverbWet = P.reverb.process(x * 0.25, 0.6);
-  x = x + reverbWet * 0.3;
-  // tanh saturation
-  x = tanhSat(x, 0.3 + P.energy * 0.4);
-  // compressor (4:1, threshold -18dB ≈ 0.126)
+  if(!P.reverb) P.reverb = new Reverb(sr);
+  var wet = P.reverb.process(x * 0.2, 0.6) * (P.macroSpace * 0.5);
+  x = x + wet;
+  if(!P.chorus) P.chorus = new Chorus(sr);
+  x = P.chorus.process(x, 0.5, 0.15, sr);
+  var drive = 0.3 + P.energy * 0.3 + P.macroTension * 0.2;
+  x = Math.tanh(x * (1 + drive * 3)) / Math.tanh(1 + drive * 3);
   x = P.comp.process(x, 0.126, 4, 5, 50, sr);
-  // makeup gain
-  x *= 1.5;
-  // limiter (hard clip at 0.95)
-  if(x > 0.95) x = 0.95;
-  if(x < -0.95) x = -0.95;
+  x *= 1.4;
+  if(x > 0.95) x = 0.95; if(x < -0.95) x = -0.95;
   return x;
 }
 
 class PsyStudioProcessor extends AudioWorkletProcessor {
   constructor(){
-    super();
-    this.params = P;
-    initGrammar(P.seed);
+    super(); initGrammar(P.seed);
+    if(!P.reverb) P.reverb = new Reverb(sampleRate);
+    if(!P.chorus) P.chorus = new Chorus(sampleRate);
     var self = this;
     this.port.onmessage = function(e){
       var d = e.data;
-      if(d.type === "setParams"){
-        for(var k in d.params) P[k] = d.params[k];
-        if(d.params.mood){
-          if(d.params.mood === "dark") P.scale = [0,1,3,5,7,8,10];
-          else if(d.params.mood === "prog") P.scale = [0,3,5,7,10];
-          else P.scale = [0,1,4,5,7,8,10];
-        }
-      } else if(d.type === "setSeed"){
-        P.seed = d.seed; initGrammar(d.seed); P.barIndex = 0;
-      } else if(d.type === "start"){
-        P.playing = true; P.nextBarTime = currentTime + 0.05;
-      } else if(d.type === "stop"){
-        P.playing = false;
-      } else if(d.type === "getTimeline"){
-        // generate timeline for export (pure data)
-        var tl = self.generateTimeline(d.bars);
-        self.port.postMessage({ type:"timeline", timeline: tl });
-      }
+      if(d.type === "setParams"){ for(var k in d.params) P[k] = d.params[k];
+        if(d.params.mood){ if(d.params.mood==="dark")P.scale=[0,1,3,5,7,8,10]; else if(d.params.mood==="prog")P.scale=[0,3,5,7,10]; else P.scale=[0,1,4,5,7,8,10]; }
+      } else if(d.type === "setMacro"){
+        if(d.macro==="tension")P.macroTension=d.value; else if(d.macro==="brightness")P.macroBrightness=d.value; else if(d.macro==="space")P.macroSpace=d.value;
+      } else if(d.type === "setMixer"){ if(P.mixer[d.channel]) P.mixer[d.channel][d.prop] = d.value;
+      } else if(d.type === "setSeed"){ P.seed=d.seed;initGrammar(d.seed);P.barIndex=0;
+      } else if(d.type === "start"){ P.playing=true;P.nextBarTime=0;
+      } else if(d.type === "stop"){ P.playing=false;
+      } else if(d.type === "seekBar"){ P.barIndex=Math.max(0,d.bar);P.nextBarTime=0;P.currentPlan=null;
+      } else if(d.type === "getTimeline"){ self.port.postMessage({type:"timeline",timeline:self.generateTimeline(d.bars)}); }
     };
   }
   generateTimeline(bars){
-    var events = [];
-    var saveBar = P.barIndex;
-    P.barIndex = 0;
-    for(var b = 0; b < bars; b++){
-      var plan = planBar();
-      if(plan.steps){
-        for(var s = 0; s < 16; s++){
-          var st = plan.steps[s];
-          var t = b * (60/P.bpm * 4) + s * (60/P.bpm/4);
-          if(st.kick) events.push({audioTime:t, voice:"kick", midi:null, bar:b, step:s});
-          if(st.bassNote !== null) events.push({audioTime:t, voice:"bass", midi:st.bassNote, bar:b, step:s});
-          if(st.leadNote !== null) events.push({audioTime:t, voice:"lead", midi:st.leadNote, bar:b, step:s});
-          if(st.padNote !== null) events.push({audioTime:t, voice:"pad", midi:st.padNote, bar:b, step:s});
-        }
-      }
-      P.barIndex++;
-    }
-    P.barIndex = saveBar;
-    return { events: events, bpm: P.bpm, bars: bars, lengthSeconds: bars * (60/P.bpm * 4) };
+    var events=[], saveBar=P.barIndex; P.barIndex=0;
+    for(var b=0;b<bars;b++){ P.tension=getTension(b); var plan=planBar();
+      if(plan.steps){ for(var s=0;s<16;s++){ var st=plan.steps[s]; var t=b*(60/P.bpm*4)+s*(60/P.bpm/4);
+        if(st.kick)events.push({audioTime:t,voice:"kick",midi:null,bar:b,step:s});
+        if(st.bassNote!==null)events.push({audioTime:t,voice:"bass",midi:st.bassNote,bar:b,step:s});
+        if(st.leadNote!==null)events.push({audioTime:t,voice:"lead",midi:st.leadNote,bar:b,step:s});
+        if(st.padNote!==null)events.push({audioTime:t,voice:"pad",midi:st.padNote,bar:b,step:s}); } }
+      P.barIndex++; }
+    P.barIndex=saveBar;
+    return {events:events,bpm:P.bpm,bars:bars,lengthSeconds:bars*(60/P.bpm*4)};
   }
   process(inputs, outputs){
-    var out = outputs[0];
-    var sr = sampleRate;
-    var dt = 1 / sr;
-    var stepDur = 60 / P.bpm / 4;
-    var barDur = 60 / P.bpm * 4;
-    for(var i = 0; i < out[0].length; i++){
-      var t = currentTime + i * dt;
-      // bar scheduling: if nextBarTime is in the past or uninitialized, set it to now
-      if(P.playing && P.nextBarTime === 0){ P.nextBarTime = t + 0.05; }
-      // catch up if we fell behind (skip planning for missed bars)
-      while(P.playing && t >= P.nextBarTime){
-        P.barIndex++;
-        P.currentPlan = planBar();
-        P.currentBarStart = P.nextBarTime;
-        P.nextBarTime += barDur;
-        var phase = P.barIndex % 32;
-        if(phase < 4) P.section = "INTRO";
-        else if(phase < 8) P.section = "BUILD";
-        else if(phase < 16) P.section = "DROP";
-        else if(phase < 20) P.section = "BREAK";
-        else if(phase < 24) P.section = "RISER";
-        else P.section = "DROP2";
-      }
-      // step scheduling: use currentBarStart (the start of the bar we're in)
-      if(P.playing && P.currentPlan && P.currentPlan.steps && P.currentBarStart !== undefined){
-        var stepInBar = Math.floor((t - P.currentBarStart) / stepDur);
-        if(stepInBar >= 0 && stepInBar < 16){
-          var step = P.currentPlan.steps[stepInBar];
-          var stepStart = P.currentBarStart + stepInBar * stepDur;
-          // trigger if we just crossed into this step (within one render quantum = 128 samples = ~2.9ms)
-          // use a window of stepDur (much larger than dt*2) to avoid missing triggers
-          if(t >= stepStart && t < stepStart + stepDur && !step._triggered){
-            step._triggered = true; // mark so we don't re-trigger within this bar
-            if(step.kick) triggerVoice(P.kick, 0);
-            if(step.bassNote !== null) triggerVoice(P.bass, step.bassNote);
-            if(step.leadNote !== null) triggerVoice(P.lead, step.leadNote);
-            if(step.padNote !== null) triggerVoice(P.pad, step.padNote);
-          }
-        }
-      }
-      // render
-      var s = 0;
-      s += renderVoice(P.kick, sr);
-      s += renderVoice(P.bass, sr);
-      s += renderVoice(P.sub, sr);  // A: sub-bass
-      s += renderVoice(P.lead, sr);
-      s += renderVoice(P.pad, sr);
-      // A: sidechain recovery — bring gain back up exponentially after kick
-      P.sidechainGain = P.sidechainGain * 0.998 + 1.0 * 0.002;
-      s = masterProcess(s, sr);
-      out[0][i] = s; out[1][i] = s;
+    var out=outputs[0], sr=sampleRate, dt=1/sr, stepDur=60/P.bpm/4, barDur=60/P.bpm*4;
+    for(var i=0;i<out[0].length;i++){
+      var t=currentTime+i*dt;
+      if(P.playing&&P.nextBarTime===0)P.nextBarTime=t+0.05;
+      while(P.playing&&t>=P.nextBarTime){ P.barIndex++;P.tension=getTension(P.barIndex);P.section=getSection(P.barIndex);P.currentPlan=planBar();P.currentBarStart=P.nextBarTime;P.nextBarTime+=barDur; }
+      if(P.playing&&P.currentPlan&&P.currentPlan.steps){
+        var stepInBar=Math.floor((t-P.currentBarStart)/stepDur);
+        if(stepInBar>=0&&stepInBar<16){ var step=P.currentPlan.steps[stepInBar]; var stepStart=P.currentBarStart+stepInBar*stepDur;
+          if(t>=stepStart&&t<stepStart+stepDur&&!step._trig){ step._trig=true;
+            if(step.kick)triggerKick(); if(step.bassNote!==null)triggerBass(step.bassNote);
+            if(step.leadNote!==null)triggerLead(step.leadNote); if(step.padNote!==null)triggerPad(step.padNote);
+            if(step.hat)triggerHat(); if(step.clap)triggerClap(); if(step.snare)triggerSnare(); if(step.crash)triggerCrash(); } } }
+      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr);s+=rLead(sr);s+=rPad(sr);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);
+      P.sidechainGain=P.sidechainGain*0.997+1.0*0.003;
+      s=masterProcess(s,sr);
+      out[0][i]=s;out[1][i]=s;
     }
-    // post metrics ~10Hz
-    if(currentTime - P.lastMetricPost > 0.1){
-      P.lastMetricPost = currentTime;
-      this.port.postMessage({
-        type: "metrics",
-        barIndex: P.barIndex,
-        section: P.section,
-        bpm: P.bpm,
-        energy: P.energy,
-        directorAction: P.currentPlan ? P.currentPlan.decision.action : "abstain",
-        directorReason: P.currentPlan ? P.currentPlan.decision.reason : "init"
-      });
-    }
+    if(currentTime-P.lastMetricPost>0.1){ P.lastMetricPost=currentTime;
+      this.port.postMessage({type:"metrics",barIndex:P.barIndex,section:P.section,bpm:P.bpm,energy:P.energy,tension:P.tension,chordRoot:getChordRoot(P.barIndex),directorAction:P.currentPlan?P.currentPlan.decision.action:"abstain",directorReason:P.currentPlan?P.currentPlan.decision.reason:"init",mixer:P.mixer,macros:{tension:P.macroTension,brightness:P.macroBrightness,space:P.macroSpace}}); }
     return true;
   }
 }
 registerProcessor("psy-studio-processor", PsyStudioProcessor);
 `;
 
-/* ═══════ foundation loader (for export only — WAV encoder, MIDI encoder) ═══════ */
+/* ═══════ foundation loader (for export only) ═══════ */
 function loadFoundation(){
   return new Promise(function(resolve, reject){
     var modules = ["foundation/foundation.mjs","foundation/render.mjs","foundation/midi.mjs"];
@@ -824,13 +773,11 @@ function loadFoundation(){
 function start(){
   MASTER = AUDIO.createGain(); MASTER.gain.value = 0.7;
   MASTER.connect(AUDIO.destination);
-  // delay + reverb sends (light — keep CPU low)
   var delay = AUDIO.createDelay(2.0); delay.delayTime.value = 60/STATE.bpm * 0.75;
   var fb = AUDIO.createGain(); fb.gain.value = 0.3; delay.connect(fb); fb.connect(delay);
-  var wetD = AUDIO.createGain(); wetD.gain.value = 0.18; delay.connect(wetD); wetD.connect(MASTER);
-  var tap = AUDIO.createGain(); tap.gain.value = 0.3; MASTER.connect(tap); tap.connect(delay);
+  var wetD = AUDIO.createGain(); wetD.gain.value = 0.15; delay.connect(wetD); wetD.connect(MASTER);
+  var tap = AUDIO.createGain(); tap.gain.value = 0.2; MASTER.connect(tap); tap.connect(delay);
 
-  // AudioWorklet
   var blob = new Blob([WORKLET_CODE], {type:"application/javascript"});
   var url = URL.createObjectURL(blob);
   AUDIO.audioWorklet.addModule(url).then(function(){
@@ -839,54 +786,35 @@ function start(){
     });
     WORKLET.connect(MASTER);
     WORKLET.port.onmessage = onWorkletMessage;
-    // apply initial state
     WORKLET.port.postMessage({type:"setParams", params:{bpm:STATE.bpm, energy:STATE.energy, mood:STATE.mood, seed:STATE.seed}});
     WORKLET.port.postMessage({type:"setSeed", seed:STATE.seed});
     WORKLET.port.postMessage({type:"start"});
     STATE.playing = true;
     document.getElementById("start").classList.add("hidden");
-    setStatus("● live — AudioWorklet synthesis (no main-thread blocking)", true);
+    setStatus("● live — pro sound engine", true);
     drawViz();
-    setupMediaSession();  // B: Media Session API for lock screen / mobile controls
+    setupMediaSession();
   }).catch(function(err){
     setStatus("AudioWorklet failed: " + err.message, false);
     console.error("[PSY STUDIO]", err);
   });
 }
 
-/* B: Media Session API — lock screen controls (mobile + desktop) */
+/* B: Media Session API */
 function setupMediaSession(){
   if(!("mediaSession" in navigator)) return;
   navigator.mediaSession.metadata = new MediaMetadata({
     title: "PSY STUDIO — " + STATE.mood.toUpperCase(),
     artist: "Generative Psytrance Engine",
     album: "PSY STUDIO",
-    artwork: [{
-      src: "data:image/svg+xml;utf8," + encodeURIComponent(
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'>" +
-        "<rect width='512' height='512' fill='#050208'/>" +
-        "<text x='256' y='300' font-family='monospace' font-size='160' font-weight='900' " +
-        "text-anchor='middle' fill='#00f0c8'>PSY</text></svg>"
-      ),
-      sizes: "512x512",
-      type: "image/svg+xml"
-    }]
+    artwork: [{ src: "data:image/svg+xml;utf8," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='#050208'/><text x='256' y='300' font-family='monospace' font-size='160' font-weight='900' text-anchor='middle' fill='#00f0c8'>PSY</text></svg>"), sizes: "512x512", type: "image/svg+xml" }]
   });
-  navigator.mediaSession.setActionHandler("play", function(){
-    if(WORKLET){ WORKLET.port.postMessage({type:"start"}); STATE.playing = true; }
-    navigator.mediaSession.playbackState = "playing";
-  });
-  navigator.mediaSession.setActionHandler("pause", function(){
-    if(WORKLET){ WORKLET.port.postMessage({type:"stop"}); STATE.playing = false; }
-    navigator.mediaSession.playbackState = "paused";
-  });
+  navigator.mediaSession.setActionHandler("play", function(){ if(WORKLET){ WORKLET.port.postMessage({type:"start"}); STATE.playing=true; } navigator.mediaSession.playbackState="playing"; });
+  navigator.mediaSession.setActionHandler("pause", function(){ if(WORKLET){ WORKLET.port.postMessage({type:"stop"}); STATE.playing=false; } navigator.mediaSession.playbackState="paused"; });
   navigator.mediaSession.playbackState = "playing";
-
-  // B: iOS Safari — handle audio interruption (phone call, alarm, etc.)
   AUDIO.addEventListener("statechange", function(){
     if(AUDIO.state === "interrupted" || AUDIO.state === "suspended"){
       STATE.playing = false;
-      setStatus("audio interrupted — click to resume", true);
       document.getElementById("start").classList.remove("hidden");
       var hint = document.getElementById("start").querySelector(".play-hint");
       if(hint) hint.textContent = "▶ RESUME";
@@ -897,13 +825,11 @@ function setupMediaSession(){
 function onWorkletMessage(e){
   var m = e.data;
   if(m.type === "metrics"){
-    STATE.barIndex = m.barIndex;
-    STATE.section = m.section;
-    STATE.bpm = m.bpm;
-    STATE.lastMetrics = m;
-    updateNowPlaying(m);
-    updateDirector(m);
+    STATE.barIndex = m.barIndex; STATE.section = m.section; STATE.bpm = m.bpm;
+    STATE.tension = m.tension; STATE.lastMetrics = m;
+    updateNowPlaying(m); updateDirector(m); updateMixerUI(m.mixer); updateMacrosUI(m.macros);
   }
+  if(m.type === "timeline"){ onTimelineForExport(m.timeline); }
 }
 
 function updateNowPlaying(m){
@@ -912,52 +838,65 @@ function updateNowPlaying(m){
   document.getElementById("np-key").textContent = STATE.mood === "dark" ? "A min" : (STATE.mood === "prog" ? "A penta" : "A phr.dom");
   document.getElementById("np-bar").textContent = m.barIndex;
   document.getElementById("np-seed").textContent = STATE.seed;
+  // tension bar
+  var tbar = document.getElementById("tension-bar");
+  if(tbar) tbar.style.width = (m.tension * 100) + "%";
+  var vt = document.getElementById("val-tension");
+  if(vt) vt.textContent = m.tension.toFixed(2);
+  // update macro values display
+  ["tension","brightness","space"].forEach(function(macro){
+    var el = document.getElementById("val-macro-"+macro);
+    var slider = document.getElementById("macro-"+macro);
+    if(el && slider) el.textContent = parseFloat(slider.value).toFixed(2);
+  });
 }
 function updateDirector(m){
-  var led = document.getElementById("dir-led");
-  var txt = document.getElementById("dir-txt");
-  if(m.directorAction === "play"){
-    led.className = "dir-led play"; txt.className = "dir-txt play";
-    txt.textContent = "PLAY · " + (m.directorReason || "");
-  } else {
-    led.className = "dir-led abstain"; txt.className = "dir-txt abstain";
-    txt.textContent = "ABSTAIN · " + (m.directorReason || "");
+  var led = document.getElementById("dir-led"), txt = document.getElementById("dir-txt");
+  if(m.directorAction === "play"){ led.className="dir-led play"; txt.className="dir-txt play"; txt.textContent="PLAY"; }
+  else { led.className="dir-led abstain"; txt.className="dir-txt abstain"; txt.textContent="ABSTAIN"; }
+}
+function updateMixerUI(mixer){
+  if(!mixer) return;
+  for(var ch in mixer){
+    var vol = document.getElementById("mix-"+ch+"-vol");
+    if(vol && vol._dragging !== true) vol.value = mixer[ch].vol;
+    var mute = document.getElementById("mix-"+ch+"-mute");
+    if(mute) mute.classList.toggle("muted", mixer[ch].mute);
   }
 }
+function updateMacrosUI(macros){
+  if(!macros) return;
+  var t = document.getElementById("macro-tension"); if(t && !t._dragging) t.value = macros.tension;
+  var b = document.getElementById("macro-brightness"); if(b && !b._dragging) b.value = macros.brightness;
+  var s = document.getElementById("macro-space"); if(s && !s._dragging) s.value = macros.space;
+}
 
-/* ═══════ visualizer (circular, smooth) ═══════ */
+/* ═══════ visualizer ═══════ */
 function drawViz(){
   var canvas = document.getElementById("viz");
-  if(!canvas) return;
+  if(!canvas){ return; }
   var ctx = canvas.getContext("2d");
   var w = canvas.width, h = canvas.height, cx = w/2, cy = h/2;
   ctx.fillStyle = "rgba(5,2,8,0.18)"; ctx.fillRect(0,0,w,h);
   if(!STATE.playing){ requestAnimationFrame(drawViz); return; }
   var t = performance.now() / 1000;
-  var energy = STATE.energy;
+  var tension = STATE.tension || 0.5;
   var beatPhase = (STATE.audioTime / (60/STATE.bpm)) % 1;
   var beatPulse = Math.exp(-beatPhase * 4);
-  // outer ring
-  ctx.strokeStyle = "rgba(185,103,255," + (0.25 + energy * 0.4) + ")"; ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(185,103,255," + (0.25 + tension * 0.4) + ")"; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(cx, cy, w*0.44, 0, 2*Math.PI); ctx.stroke();
-  // beat pulse
   ctx.fillStyle = "rgba(0,240,200," + (0.05 + beatPulse * 0.2) + ")";
   ctx.beginPath(); ctx.arc(cx, cy, w*(0.12 + beatPulse*0.08), 0, 2*Math.PI); ctx.fill();
-  // radial step lines
   for(var i = 0; i < 16; i++){
     var angle = (i / 16) * 2 * Math.PI - Math.PI/2 + t * 0.04;
-    var r1 = w * 0.26, r2 = w * (0.32 + energy * 0.1);
-    var active = STATE.lastMetrics && STATE.lastMetrics.barIndex % 16 === i;
+    var r1 = w * 0.26, r2 = w * (0.32 + tension * 0.1);
+    var active = STATE.lastMetrics && (i % 4 === 0);
     ctx.strokeStyle = active ? "rgba(255,46,136,0.7)" : "rgba(157,143,192,0.18)";
     ctx.lineWidth = active ? 2.5 : 1;
-    ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(angle)*r1, cy + Math.sin(angle)*r1);
-    ctx.lineTo(cx + Math.cos(angle)*r2, cy + Math.sin(angle)*r2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(angle)*r1, cy + Math.sin(angle)*r1);
+    ctx.lineTo(cx + Math.cos(angle)*r2, cy + Math.sin(angle)*r2); ctx.stroke();
   }
-  // center letter
-  ctx.fillStyle = "rgba(239,233,251,0.9)";
-  ctx.font = "900 36px ui-monospace, monospace";
+  ctx.fillStyle = "rgba(239,233,251,0.9)"; ctx.font = "900 36px ui-monospace, monospace";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(STATE.section.charAt(0), cx, cy);
   requestAnimationFrame(drawViz);
@@ -973,15 +912,13 @@ function setupControls(){
   var slEnergy = document.getElementById("sl-energy");
   var valEnergy = document.getElementById("val-energy");
   slEnergy.addEventListener("input", function(){
-    STATE.energy = parseFloat(this.value);
-    valEnergy.textContent = STATE.energy.toFixed(2);
+    STATE.energy = parseFloat(this.value); valEnergy.textContent = STATE.energy.toFixed(2);
     if(WORKLET) WORKLET.port.postMessage({type:"setParams", params:{energy:STATE.energy}});
   });
   var slBpm = document.getElementById("sl-bpm");
   var valBpm = document.getElementById("val-bpm");
   slBpm.addEventListener("input", function(){
-    STATE.bpm = parseInt(this.value);
-    valBpm.textContent = STATE.bpm;
+    STATE.bpm = parseInt(this.value); valBpm.textContent = STATE.bpm;
     if(WORKLET) WORKLET.port.postMessage({type:"setParams", params:{bpm:STATE.bpm}});
   });
   document.querySelectorAll(".mood").forEach(function(m){
@@ -991,6 +928,39 @@ function setupControls(){
       if(WORKLET) WORKLET.port.postMessage({type:"setParams", params:{mood:STATE.mood}});
     });
   });
+  // macros
+  ["tension","brightness","space"].forEach(function(macro){
+    var el = document.getElementById("macro-"+macro);
+    if(el){
+      el._dragging = false;
+      el.addEventListener("input", function(){
+        var v = parseFloat(this.value);
+        if(WORKLET) WORKLET.port.postMessage({type:"setMacro", macro:macro, value:v});
+      });
+      el.addEventListener("pointerdown", function(){ this._dragging = true; });
+      el.addEventListener("pointerup", function(){ this._dragging = false; });
+    }
+  });
+  // mixer
+  ["kick","bass","sub","lead","pad","drums"].forEach(function(ch){
+    var vol = document.getElementById("mix-"+ch+"-vol");
+    if(vol){
+      vol._dragging = false;
+      vol.addEventListener("input", function(){
+        var v = parseFloat(this.value);
+        if(WORKLET) WORKLET.port.postMessage({type:"setMixer", channel:ch, prop:"vol", value:v});
+      });
+      vol.addEventListener("pointerdown", function(){ this._dragging = true; });
+      vol.addEventListener("pointerup", function(){ this._dragging = false; });
+    }
+    var mute = document.getElementById("mix-"+ch+"-mute");
+    if(mute){
+      mute.addEventListener("click", function(){
+        var isMuted = this.classList.toggle("muted");
+        if(WORKLET) WORKLET.port.postMessage({type:"setMixer", channel:ch, prop:"mute", value:isMuted});
+      });
+    }
+  });
   // presets
   document.querySelectorAll(".preset").forEach(function(p){
     p.addEventListener("click", function(){
@@ -998,13 +968,11 @@ function setupControls(){
       var key = "psy-studio-preset-" + slot;
       var saved = localStorage.getItem(key);
       if(!saved || p.classList.contains("active")){
-        // save current
         var data = JSON.stringify({seed:STATE.seed, bpm:STATE.bpm, energy:STATE.energy, mood:STATE.mood});
         localStorage.setItem(key, data);
         p.classList.add("saved"); p.classList.remove("active");
         setStatus("preset " + ["A","B","C","D"][slot] + " saved", true);
       } else {
-        // recall
         var data = JSON.parse(saved);
         STATE.seed = data.seed; STATE.bpm = data.bpm; STATE.energy = data.energy; STATE.mood = data.mood;
         if(WORKLET){
@@ -1024,26 +992,39 @@ function setupControls(){
   document.getElementById("btn-reseed").addEventListener("click", function(){
     STATE.seed = Math.floor(Math.random() * 1000000);
     if(WORKLET) WORKLET.port.postMessage({type:"setSeed", seed:STATE.seed});
-    setStatus("reseeded — new musical identity", true);
+    setStatus("reseeded", true);
   });
   // share
   document.getElementById("btn-share").addEventListener("click", function(){
     var url = location.origin + location.pathname + "#s=" + STATE.seed + "&b=" + STATE.bpm + "&m=" + STATE.mood + "&e=" + STATE.energy.toFixed(2);
-    if(navigator.clipboard){
-      navigator.clipboard.writeText(url).then(function(){
-        setStatus("shareable URL copied to clipboard", true);
-      });
+    if(navigator.clipboard){ navigator.clipboard.writeText(url).then(function(){ setStatus("URL copied", true); }); }
+    else { prompt("Copy:", url); }
+  });
+  // transport
+  var playBtn = document.getElementById("btn-play");
+  if(playBtn) playBtn.addEventListener("click", function(){
+    if(STATE.playing){
+      if(WORKLET) WORKLET.port.postMessage({type:"stop"});
+      STATE.playing = false; playBtn.textContent = "▶ PLAY";
     } else {
-      prompt("Copy this URL:", url);
+      if(WORKLET) WORKLET.port.postMessage({type:"start"});
+      STATE.playing = true; playBtn.textContent = "⏸ PAUSE";
     }
   });
-  // export menu
+  // seek to section
+  document.querySelectorAll(".section-jump").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var sec = this.dataset.section;
+      var barMap = {INTRO:0, BUILD:4, DROP:8, BREAK:16, RISER:20, DROP2:24};
+      var bar = barMap[sec] || 0;
+      if(WORKLET) WORKLET.port.postMessage({type:"seekBar", bar:bar});
+      setStatus("jumped to " + sec, true);
+    });
+  });
+  // export
   var exportBtn = document.getElementById("btn-export");
   var exportMenu = document.getElementById("export-menu");
-  exportBtn.addEventListener("click", function(e){
-    e.stopPropagation();
-    exportMenu.classList.toggle("open");
-  });
+  exportBtn.addEventListener("click", function(e){ e.stopPropagation(); exportMenu.classList.toggle("open"); });
   document.addEventListener("click", function(){ exportMenu.classList.remove("open"); });
   exportMenu.addEventListener("click", function(e){ e.stopPropagation(); });
   document.querySelectorAll(".export-item").forEach(function(item){
@@ -1057,123 +1038,59 @@ function setupControls(){
 
 /* ═══════ export ═══════ */
 function handleExport(type){
-  if(!F){ setStatus("foundation not loaded yet for export", false); return; }
+  if(!F){ setStatus("foundation not loaded", false); return; }
   if(type === "project"){
-    var project = { version:"1.0", seed:STATE.seed, bpm:STATE.bpm, energy:STATE.energy, mood:STATE.mood,
-                    scale:STATE.lastMetrics ? null : null, created: new Date().toISOString() };
-    var blob = new Blob([JSON.stringify(project, null, 2)], {type:"application/json"});
+    var project = {version:"1.0", seed:STATE.seed, bpm:STATE.bpm, energy:STATE.energy, mood:STATE.mood, created:new Date().toISOString()};
+    var blob = new Blob([JSON.stringify(project,null,2)], {type:"application/json"});
     downloadBlob(blob, "psy-studio-" + STATE.seed + ".psy.json");
-    setStatus("project saved: " + (blob.size/1024).toFixed(1) + " KB", true);
-    return;
+    setStatus("project saved", true); return;
   }
   if(type === "midi"){
-    // request timeline from worklet
-    WORKLET.port.postMessage({type:"getTimeline", bars: 32}); // 32 bars ≈ 2-3 min
-    setStatus("generating MIDI...", true);
-    STATE._pendingMidi = true;
-    return;
+    WORKLET.port.postMessage({type:"getTimeline", bars:32});
+    setStatus("generating MIDI...", true); STATE._pendingMidi = true; return;
   }
-  // WAV exports
   var bars = type === "wav1" ? 8 : (type === "wav5" ? 40 : 80);
-  var seconds = bars * (60/STATE.bpm * 4);
-  setStatus("rendering " + (seconds/60).toFixed(1) + " min WAV offline (no real-time wait)...", true);
-  WORKLET.port.postMessage({type:"getTimeline", bars: bars});
-  STATE._pendingWav = { bars: bars, type: type, seconds: seconds };
+  setStatus("rendering...", true);
+  WORKLET.port.postMessage({type:"getTimeline", bars:bars});
+  STATE._pendingWav = {bars:bars, type:type};
 }
-
 function downloadBlob(blob, name){
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement("a");
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  var url = URL.createObjectURL(blob); var a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
 }
-
-// Handle timeline response from worklet (for export)
-var _timelineHandler = null;
 function onTimelineForExport(timeline){
   if(STATE._pendingMidi){
     STATE._pendingMidi = false;
-    var midi = F.midi.timelineToMidiFile({events: timeline.events.map(function(e){
-      return { voice: e.voice, midi: e.midi, beat: e.audioTime / (60/STATE.bpm), durationBeats: 0.5,
-               velocity: 0.8, accent: 0.5, bar: e.bar, step: e.step };
-    }), eventCount: timeline.events.length, lengthBeats: timeline.lengthSeconds * (STATE.bpm/60)},
-      { bpm: timeline.bpm, ticksPerBeat: 480 });
-    downloadBlob(new Blob([midi], {type:"audio/midi"}), "psy-studio-" + STATE.seed + ".mid");
-    setStatus("MIDI exported: " + (midi.byteLength/1024).toFixed(1) + " KB, " + timeline.events.length + " events", true);
-    return;
+    var midi = F.midi.timelineToMidiFile({events:timeline.events.map(function(e){
+      return {voice:e.voice, midi:e.midi, beat:e.audioTime/(60/STATE.bpm), durationBeats:0.5, velocity:0.8, accent:0.5, bar:e.bar, step:e.step};
+    }), eventCount:timeline.events.length, lengthBeats:timeline.lengthSeconds*(STATE.bpm/60)},
+      {bpm:timeline.bpm, ticksPerBeat:480});
+    downloadBlob(new Blob([midi],{type:"audio/midi"}), "psy-studio-" + STATE.seed + ".mid");
+    setStatus("MIDI: " + (midi.byteLength/1024).toFixed(1) + " KB", true); return;
   }
   if(STATE._pendingWav){
     var p = STATE._pendingWav; STATE._pendingWav = null;
-    if(p.type === "stems"){
-      renderStems(timeline, p);
-    } else {
-      renderWav(timeline, p);
-    }
+    var SR = 44100, numSamples = Math.floor(timeline.lengthSeconds * SR);
+    var data = new Float32Array(numSamples);
+    timeline.events.forEach(function(ev){
+      var start = Math.floor(ev.audioTime * SR), dur = Math.floor(0.15 * SR);
+      var freq = ev.midi !== null ? 440*Math.pow(2,(ev.midi-69)/12) : 60;
+      for(var i = 0; i < dur && start+i < numSamples; i++){
+        var t = i/SR, amp = Math.exp(-t*8)*(ev.voice==="kick"?0.4:0.2);
+        if(ev.voice==="kick") data[start+i] += Math.sin(2*Math.PI*(60-t*40)*t)*amp;
+        else data[start+i] += Math.sin(2*Math.PI*freq*t)*amp;
+      }
+    });
+    for(var i = 0; i < data.length; i++){ if(data[i]>1)data[i]=1; if(data[i]<-1)data[i]=-1; }
+    var buf = {sampleRate:SR, numberOfChannels:1, length:numSamples, getChannelData:function(){return data;}};
+    var wav = F.render.audioBufferToWav(buf);
+    downloadBlob(new Blob([wav],{type:"audio/wav"}), "psy-studio-" + STATE.seed + ".wav");
+    setStatus("WAV: " + (wav.byteLength/1024/1024).toFixed(1) + " MB", true);
   }
 }
 
-function renderWav(timeline, p){
-  var SR = 44100;
-  var numSamples = Math.floor(timeline.lengthSeconds * SR);
-  var data = new Float32Array(numSamples);
-  var dt = 1 / SR;
-  // simple synth per event (proves the WAV encoder; full per-sample would need a worklet)
-  timeline.events.forEach(function(ev){
-    var startSample = Math.floor(ev.audioTime * SR);
-    var durSamples = Math.floor(0.15 * SR); // 150ms envelope
-    var freq = ev.midi !== null ? 440 * Math.pow(2, (ev.midi - 69)/12) : 60;
-    for(var i = 0; i < durSamples && startSample + i < numSamples; i++){
-      var t = i / SR;
-      var amp = Math.exp(-t * 8) * (ev.voice === "kick" ? 0.4 : 0.2);
-      if(ev.voice === "kick") data[startSample + i] += Math.sin(2*Math.PI*(60 - t*40)*t) * amp;
-      else data[startSample + i] += Math.sin(2*Math.PI*freq*t) * amp;
-    }
-  });
-  // clamp
-  for(var i = 0; i < data.length; i++){ if(data[i] > 1) data[i] = 1; if(data[i] < -1) data[i] = -1; }
-  var buf = { sampleRate: SR, numberOfChannels: 1, length: numSamples, getChannelData: function(){ return data; } };
-  var wav = F.render.audioBufferToWav(buf);
-  var minutes = Math.floor(timeline.lengthSeconds / 60);
-  downloadBlob(new Blob([wav], {type:"audio/wav"}),
-    "psy-studio-" + STATE.seed + "-" + minutes + "min.wav");
-  setStatus("WAV ready: " + (wav.byteLength/1024/1024).toFixed(1) + " MB, " + timeline.events.length + " events, " + minutes + " min", true);
-}
-
-function renderStems(timeline, p){
-  var SR = 44100;
-  var numSamples = Math.floor(timeline.lengthSeconds * SR);
-  var voices = ["kick","bass","lead","pad"];
-  var stems = {};
-  voices.forEach(function(v){
-    var data = new Float32Array(numSamples);
-    var dt = 1 / SR;
-    timeline.events.filter(function(e){ return e.voice === v; }).forEach(function(ev){
-      var startSample = Math.floor(ev.audioTime * SR);
-      var durSamples = Math.floor(0.15 * SR);
-      var freq = ev.midi !== null ? 440 * Math.pow(2, (ev.midi - 69)/12) : 60;
-      for(var i = 0; i < durSamples && startSample + i < numSamples; i++){
-        var t = i / SR;
-        var amp = Math.exp(-t * 8) * 0.3;
-        data[startSample + i] += Math.sin(2*Math.PI*freq*t) * amp;
-      }
-    });
-    var buf = { sampleRate: SR, numberOfChannels: 1, length: numSamples, getChannelData: function(){ return data; } };
-    stems[v] = F.render.audioBufferToWav(buf);
-    downloadBlob(new Blob([stems[v]], {type:"audio/wav"}), "psy-studio-" + STATE.seed + "-stem-" + v + ".wav");
-  });
-  setStatus("stems exported: " + voices.length + " WAVs, " + (Object.values(stems).reduce(function(s,b){return s+b.byteLength;},0)/1024/1024).toFixed(1) + " MB total", true);
-}
-
-// Hook timeline responses
-var _origOnWorkletMessage = onWorkletMessage;
-onWorkletMessage = function(e){
-  var m = e.data;
-  if(m.type === "timeline"){ onTimelineForExport(m.timeline); return; }
-  _origOnWorkletMessage(e);
-};
-
-/* ═══════ parse shareable URL ═══════ */
+/* ═══════ URL state ═══════ */
 function parseUrlState(){
   if(!location.hash) return;
   var params = new URLSearchParams(location.hash.slice(1));
@@ -1181,7 +1098,6 @@ function parseUrlState(){
   if(params.has("b")) STATE.bpm = parseInt(params.get("b")) || STATE.bpm;
   if(params.has("m")) STATE.mood = params.get("m") || STATE.mood;
   if(params.has("e")) STATE.energy = parseFloat(params.get("e")) || STATE.energy;
-  // apply to UI
   document.getElementById("sl-energy").value = STATE.energy;
   document.getElementById("val-energy").textContent = STATE.energy.toFixed(2);
   document.getElementById("sl-bpm").value = STATE.bpm;
@@ -1190,42 +1106,23 @@ function parseUrlState(){
 }
 
 /* ═══════ boot ═══════ */
-setStatus("loading foundation (for export)...");
-loadFoundation().then(function(loaded){
-  F = loaded;
-  setStatus("foundation ready — click to start", true);
-}).catch(function(err){
-  console.warn("[PSY STUDIO] foundation load failed (export will be disabled):", err);
-  setStatus("foundation load failed — export disabled, but live audio still works", true);
-});
-
+setStatus("loading foundation...");
+loadFoundation().then(function(loaded){ F = loaded; setStatus("foundation ready — click to start", true); })
+.catch(function(err){ console.warn("[PSY STUDIO]", err); setStatus("foundation load failed — export disabled", true); });
 parseUrlState();
 setupControls();
-
 document.getElementById("start").addEventListener("click", function(){
-  if(!AUDIO){
-    AUDIO = new (window.AudioContext || window.webkitAudioContext)();
-  }
+  if(!AUDIO){ AUDIO = new (window.AudioContext || window.webkitAudioContext)(); }
   if(AUDIO.state === "suspended"){
-    AUDIO.resume().then(function(){
-      console.log("[PSY STUDIO] AudioContext resumed:", AUDIO.state);
-      start();
-    }).catch(function(err){
-      setStatus("audio resume failed: " + err.message, false);
-    });
-  } else {
-    start();
-  }
+    AUDIO.resume().then(function(){ start(); }).catch(function(err){ setStatus("resume failed: "+err.message, false); });
+  } else { start(); }
 });
-
-// mark saved presets on load
 setTimeout(function(){
   ["A","B","C","D"].forEach(function(letter, i){
-    if(localStorage.getItem("psy-studio-preset-" + i)){
-      document.querySelectorAll(".preset")[i].classList.add("saved");
-    }
+    if(localStorage.getItem("psy-studio-preset-" + i)) document.querySelectorAll(".preset")[i].classList.add("saved");
   });
 }, 100);
 </script>
 </body>
 </html>
+
