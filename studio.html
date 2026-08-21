@@ -536,6 +536,81 @@ class Chorus {
   }
 }
 
+// ── LFO (low-frequency oscillator, multiple waveforms) ──
+class LFO {
+  constructor(){ this.phase = 0; this.rate = 1; this.shape = "sine"; }
+  process(dt){
+    this.phase += this.rate * dt;
+    this.phase -= Math.floor(this.phase);
+    var p = this.phase;
+    if(this.shape === "sine") return Math.sin(2 * Math.PI * p);
+    if(this.shape === "tri") return 2 * Math.abs(2 * (p - Math.floor(p + 0.5))) - 1;
+    if(this.shape === "saw") return 2 * p - 1;
+    if(this.shape === "square") return p < 0.5 ? 1 : -1;
+    if(this.shape === "s&h") return Math.floor(p * 8) / 8 * 2 - 1; // sample & hold, 8 steps
+    return Math.sin(2 * Math.PI * p);
+  }
+}
+
+// ── Moog ladder filter (cascade of 4 one-pole LPs with feedback) ──
+class MoogLadder {
+  constructor(){ this.s = [0,0,0,0]; this.s0=0; this.s1=0; this.s2=0; this.s3=0; this.fc=200; this.q=0.5; }
+  process(input, fc, q, sr){
+    this.fc = Math.max(20, Math.min(fc, sr/2 - 1));
+    this.q = Math.max(0, Math.min(q, 1));
+    // oversample 2x for stability
+    var out = 0;
+    for(var os = 0; os < 2; os++){
+      var g = 1 - Math.exp(-2 * Math.PI * this.fc / (sr * 2));
+      var fb = this.q * 4 * 0.99;
+      var inPlus = input - this.s3 * fb;
+      this.s0 = this.s0 + g * (inPlus - this.s0);
+      this.s1 = this.s1 + g * (this.s0 - this.s1);
+      this.s2 = this.s2 + g * (this.s1 - this.s2);
+      this.s3 = this.s3 + g * (this.s2 - this.s3);
+      out = this.s3;
+    }
+    return out;
+  }
+}
+
+// ── Wavetables (extended set) ──
+var _wt = null;
+function buildWavetables(){
+  if(_wt) return _wt;
+  var size = 512;
+  _wt = { saw: new Float32Array(size), square: new Float32Array(size), triangle: new Float32Array(size),
+          sine: new Float32Array(size), psy: new Float32Array(size), reese: new Float32Array(size),
+          pluck: new Float32Array(size), bell: new Float32Array(size) };
+  var dt = 1/size;
+  for(var i = 0; i < size; i++){
+    var ph = i / size;
+    _wt.saw[i] = polyblepSaw(ph, dt);
+    _wt.square[i] = polyblepSquare(ph, dt);
+    _wt.triangle[i] = 2 * Math.abs(2 * (ph - Math.floor(ph + 0.5))) - 1;
+    _wt.sine[i] = Math.sin(2 * Math.PI * ph);
+    // psy: saw + 2nd harmonic + 7th harmonic (rich, cutting)
+    _wt.psy[i] = 0.5 * polyblepSaw(ph, dt) + 0.3 * Math.sin(2*Math.PI*ph*2) + 0.2 * Math.sin(2*Math.PI*ph*7);
+    // reese: super-saw-like, 3 detuned saws in one cycle (for bass)
+    var d1 = polyblepSaw((ph + 0.01) % 1, dt);
+    var d2 = polyblepSaw((ph + 0.03) % 1, dt);
+    _wt.reese[i] = (polyblepSaw(ph, dt) * 0.4 + d1 * 0.3 + d2 * 0.3);
+    // pluck: short attack emphasis, Karplus-Strong-like (decaying harmonics)
+    _wt.pluck[i] = Math.sin(2*Math.PI*ph) * Math.exp(-ph*3) + Math.sin(2*Math.PI*ph*2) * Math.exp(-ph*5) * 0.5;
+    // bell: FM-like, sum of inharmonic partials
+    _wt.bell[i] = Math.sin(2*Math.PI*ph*2.76) * 0.5 + Math.sin(2*Math.PI*ph*5.4) * 0.3 + Math.sin(2*Math.PI*ph*8.93) * 0.2;
+  }
+  return _wt;
+}
+function wavetableOsc(table, phase){
+  var p = phase - Math.floor(phase);
+  var idx = p * table.length;
+  var i0 = Math.floor(idx) % table.length;
+  var i1 = (i0 + 1) % table.length;
+  var frac = idx - Math.floor(idx);
+  return table[i0] * (1 - frac) + table[i1] * frac;
+}
+
 var P = {
   bpm: 144, energy: 0.5, mood: "fullon", seed: 12345, playing: false,
   root: 33, scale: [0,1,4,5,7,8,10],
@@ -550,14 +625,21 @@ var P = {
     drums:{vol:0.6,mute:false,send:0.1}, sub:{vol:0.5,mute:false,send:0},
   },
   sidechainGain: 1.0, reverb: null, chorus: null, comp: new Comp(),
+  // per-channel dynamics (compressor for bass, kick)
+  bassComp: new Comp(), kickComp: new Comp(),
+  // swing + humanization
+  swing: 0.55, // 0.5 = straight, 0.66 = full swing
+  humanize: 0.3, // 0..1, velocity + timing jitter
+  // LFOs (one per voice that needs modulation)
+  bassLFO: null, leadLFO: null, padLFO: null,
   bassGrammar: null, melodicGrammar: null,
-  kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1},
-  sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5},
-  bass:{active:false,phase:0,phase2:0,freq:55,filter:new ZdfSvf(),cutoff:200,res:0.4,ampEnv:0,gain:0.5},
-  lead:{active:false,phase:0,phase2:0,freq:220,filter:new ZdfSvf(),cutoff:1200,res:0.6,fmPhase:0,fmRatio:2,fmIndex:50,ampEnv:0,gain:0.2,wavetable:0},
-  pad:{active:false,phases:[0,0,0,0,0,0,0],detunes:[0.995,0.998,1.0,1.002,1.005,0.997,1.003],freq:110,filter:new ZdfSvf(),cutoff:800,res:0.2,ampEnv:0,gain:0.15},
-  hat:{active:false,ampEnv:0,gain:0.2}, clap:{active:false,ampEnv:0,gain:0.3,bursts:0},
-  snare:{active:false,phase:0,ampEnv:0,gain:0.3}, crash:{active:false,ampEnv:0,gain:0.2},
+  kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
+  sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
+  bass:{active:false,phase:0,phase2:0,freq:55,filter:new MoogLadder(),cutoff:200,res:0.4,ampEnv:0,gain:0.5,vel:1},
+  lead:{active:false,phase:0,phase2:0,freq:220,filter:new ZdfSvf(),cutoff:1200,res:0.6,fmPhase:0,fmRatio:2,fmIndex:50,ampEnv:0,gain:0.2,wavetable:0,vel:1},
+  pad:{active:false,phases:[0,0,0,0,0,0,0],detunes:[0.995,0.998,1.0,1.002,1.005,0.997,1.003],freq:110,filter:new ZdfSvf(),cutoff:800,res:0.2,ampEnv:0,gain:0.15,vel:1},
+  hat:{active:false,ampEnv:0,gain:0.2,vel:1}, clap:{active:false,ampEnv:0,gain:0.3,bursts:0,vel:1},
+  snare:{active:false,phase:0,ampEnv:0,gain:0.3,vel:1}, crash:{active:false,ampEnv:0,gain:0.2,vel:1},
 };
 
 function initGrammar(seed){
@@ -565,10 +647,21 @@ function initGrammar(seed){
   P.melodicGrammar = { hist: new Array(25).fill(1) };
   P.rng = mulberry32(seed);
   P.directorRng = mulberry32(subSeed(seed, "director"));
+  // LFOs: bass filter sweep, lead filter tremolo, pad amp undulation
+  if(!P.bassLFO){ P.bassLFO = new LFO(); P.bassLFO.rate = 0.3; P.bassLFO.shape = "sine"; }
+  if(!P.leadLFO){ P.leadLFO = new LFO(); P.leadLFO.rate = 4.5; P.leadLFO.shape = "tri"; }
+  if(!P.padLFO){ P.padLFO = new LFO(); P.padLFO.rate = 0.15; P.padLFO.shape = "sine"; }
 }
 
-var CHORD_PROGRESSION = [0, 5, 2, 7];
-function getChordRoot(barIndex){ return CHORD_PROGRESSION[Math.floor(barIndex / 4) % 4]; }
+// Chord progression with inversions (root position, 1st inv, 2nd inv)
+var CHORD_PROGRESSION = [
+  {root:0, inv:0},  // i (root)
+  {root:5, inv:1},  // VI (1st inversion — bass on 3rd)
+  {root:2, inv:0},  // III (root)
+  {root:7, inv:2},  // VII (2nd inversion — bass on 5th)
+];
+function getChordRoot(barIndex){ return CHORD_PROGRESSION[Math.floor(barIndex / 4) % 4].root; }
+function getChordInv(barIndex){ return CHORD_PROGRESSION[Math.floor(barIndex / 4) % 4].inv; }
 function getTension(b){
   var p = b % 32;
   if(p < 4) return 0.2;
@@ -592,7 +685,11 @@ function directorDecide(){
 function degreeToMidi(deg){
   var oct = Math.floor(deg / P.scale.length);
   var idx = ((deg % P.scale.length) + P.scale.length) % P.scale.length;
-  return P.root + P.scale[idx] + 12 * oct + getChordRoot(P.barIndex);
+  var chord = getChordRoot(P.barIndex);
+  // apply inversion: shift bass notes based on chord inversion
+  var inv = getChordInv(P.barIndex);
+  var invShift = inv === 1 ? -12 : (inv === 2 ? 12 : 0); // 1st inv: down, 2nd inv: up
+  return P.root + P.scale[idx] + 12 * oct + chord + (deg < 0 ? invShift : 0);
 }
 function planBar(){
   var dec = directorDecide();
@@ -624,55 +721,76 @@ function planBar(){
   return {decision:dec, steps:steps};
 }
 
-function triggerKick(){ var v=P.kick; v.active=true;v.phase=0;v.pitchEnv=1;v.ampEnv=1;v.clickEnv=1;v.freq=120; P.sidechainGain=0.25; }
-function triggerBass(m){ var v=P.bass; v.active=true;v.phase=0;v.phase2=0;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=120+P.energy*200+P.macroBrightness*300;
-  var sv=P.sub; sv.active=true;sv.phase=0;sv.ampEnv=1;sv.freq=440*Math.pow(2,(m-12-69)/12); }
-function triggerLead(m){ var v=P.lead; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=600+P.energy*1000+P.macroBrightness*2000; v.fmIndex=20+P.energy*60+P.macroBrightness*40; v.wavetable=(v.wavetable+1)%4; }
-function triggerPad(m){ var v=P.pad; v.active=true;v.phases=[0,0,0,0,0,0,0];v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=300+P.energy*400+P.macroBrightness*600; }
-function triggerHat(){ P.hat.active=true;P.hat.ampEnv=1; }
-function triggerClap(){ P.clap.active=true;P.clap.ampEnv=1;P.clap.bursts=0; }
-function triggerSnare(){ P.snare.active=true;P.snare.phase=0;P.snare.ampEnv=1; }
-function triggerCrash(){ P.crash.active=true;P.crash.ampEnv=1; }
+function triggerKick(vel){ var v=P.kick; v.active=true;v.phase=0;v.pitchEnv=1;v.ampEnv=1;v.clickEnv=1;v.freq=120;v.vel=vel||1; P.sidechainGain=0.25; }
+function triggerBass(m,vel){ var v=P.bass; v.active=true;v.phase=0;v.phase2=0;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=120+P.energy*200+P.macroBrightness*300; v.vel=vel||1;
+  var sv=P.sub; sv.active=true;sv.phase=0;sv.ampEnv=1;sv.freq=440*Math.pow(2,(m-12-69)/12); sv.vel=vel||1; }
+function triggerLead(m,vel){ var v=P.lead; v.active=true;v.phase=0;v.phase2=0.5;v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=600+P.energy*1000+P.macroBrightness*2000; v.fmIndex=20+P.energy*60+P.macroBrightness*40; v.wavetable=(v.wavetable+1)%8; v.vel=vel||1; }
+function triggerPad(m,vel){ var v=P.pad; v.active=true;v.phases=[0,0,0,0,0,0,0];v.ampEnv=1;v.freq=440*Math.pow(2,(m-69)/12); v.cutoff=300+P.energy*400+P.macroBrightness*600; v.vel=vel||1; }
+function triggerHat(vel){ P.hat.active=true;P.hat.ampEnv=1;P.hat.vel=vel||1; }
+function triggerClap(vel){ P.clap.active=true;P.clap.ampEnv=1;P.clap.bursts=0;P.clap.vel=vel||1; }
+function triggerSnare(vel){ P.snare.active=true;P.snare.phase=0;P.snare.ampEnv=1;P.snare.vel=vel||1; }
+function triggerCrash(vel){ P.crash.active=true;P.crash.ampEnv=1;P.crash.vel=vel||1; }
 
 function rKick(sr){ var v=P.kick; if(!v.active)return 0;
   var click=v.clickEnv>0.1?noiseNext()*v.clickEnv*0.4:0; v.clickEnv*=0.9;
   v.freq=40+80*v.pitchEnv; v.pitchEnv*=0.96; v.ampEnv*=0.987;
   if(v.ampEnv<0.001){v.active=false;return 0;} v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase);
-  return (Math.sin(2*Math.PI*v.phase)*v.ampEnv+click)*v.gain*P.mixer.kick.vol*(P.mixer.kick.mute?0:1); }
+  var s=(Math.sin(2*Math.PI*v.phase)*v.ampEnv+click)*v.gain*v.vel;
+  s=P.kickComp.process(s,0.2,2,1,30,sr); // per-channel comp
+  return s*P.mixer.kick.vol*(P.mixer.kick.mute?0:1); }
 function rSub(sr){ var v=P.sub; if(!v.active)return 0; v.ampEnv*=0.9988;
   if(v.ampEnv<0.001){v.active=false;return 0;} v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase);
-  return Math.sin(2*Math.PI*v.phase)*v.ampEnv*v.gain*P.mixer.sub.vol*(P.mixer.sub.mute?0:1)*P.sidechainGain; }
-function rBass(sr){ var v=P.bass; if(!v.active)return 0; v.ampEnv*=0.9985;
-  if(v.ampEnv<0.001){v.active=false;return 0;} var dt=v.freq/sr;
-  v.phase+=dt;v.phase-=Math.floor(v.phase); v.phase2+=dt*0.5;v.phase2-=Math.floor(v.phase2);
-  var saw=polyblepSaw(v.phase,dt); var sub=Math.sin(2*Math.PI*v.phase2)*0.4;
-  var f=v.filter.process(saw*0.7+sub,v.cutoff,v.res,sr);
-  return f.low*v.ampEnv*v.gain*P.mixer.bass.vol*(P.mixer.bass.mute?0:1)*P.sidechainGain; }
-function rLead(sr){ var v=P.lead; if(!v.active)return 0; v.ampEnv*=0.999;
-  if(v.ampEnv<0.001){v.active=false;return 0;} var dt=v.freq/sr;
-  v.phase+=dt;v.phase-=Math.floor(v.phase); v.phase2+=dt*1.005;v.phase2-=Math.floor(v.phase2);
-  var s1=polyblepSaw(v.phase,dt),s2=polyblepSaw(v.phase2,dt);
+  return Math.sin(2*Math.PI*v.phase)*v.ampEnv*v.gain*v.vel*P.mixer.sub.vol*(P.mixer.sub.mute?0:1)*P.sidechainGain; }
+function rBass(sr,dt){ var v=P.bass; if(!v.active)return 0; v.ampEnv*=0.9985;
+  if(v.ampEnv<0.001){v.active=false;return 0;}
+  v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase); v.phase2+=v.freq*0.5/sr;v.phase2-=Math.floor(v.phase2);
+  // LFO modulates filter cutoff (slow sweep)
+  var lfo=P.bassLFO.process(dt);
+  var cutoff=v.cutoff+lfo*150; if(cutoff<50)cutoff=50;
+  // reese wavetable for richer bass
+  var wt=buildWavetables();
+  var reese=wavetableOsc(wt.reese, v.phase);
+  var saw=polyblepSaw(v.phase,v.freq/sr); var sub=Math.sin(2*Math.PI*v.phase2)*0.4;
+  var f=v.filter.process(reese*0.5+saw*0.3+sub*0.2,cutoff,v.res,sr);
+  var out=f*v.ampEnv*v.gain*v.vel;
+  out=P.bassComp.process(out,0.15,3,2,40,sr); // bass comp for punch
+  return out*P.mixer.bass.vol*(P.mixer.bass.mute?0:1)*P.sidechainGain; }
+function rLead(sr,dt){ var v=P.lead; if(!v.active)return 0; v.ampEnv*=0.999;
+  if(v.ampEnv<0.001){v.active=false;return 0;}
+  v.phase+=v.freq/sr;v.phase-=Math.floor(v.phase); v.phase2+=v.freq*1.005/sr;v.phase2-=Math.floor(v.phase2);
+  // LFO: tremolo (amp) + filter modulation
+  var lfo=P.leadLFO.process(dt);
+  var cutoff=v.cutoff+lfo*400; if(cutoff<100)cutoff=100;
+  // wavetable cycling: 8 tables
+  var wt=buildWavetables();
+  var tables=[wt.saw,wt.square,wt.psy,wt.triangle,wt.sine,wt.reese,wt.pluck,wt.bell];
+  var table=tables[v.wavetable%8];
+  var w=wavetableOsc(table,v.phase);
+  var s1=polyblepSaw(v.phase,v.freq/sr),s2=polyblepSaw(v.phase2,v.freq/sr);
   v.fmPhase+=(v.freq*v.fmRatio)/sr;v.fmPhase-=Math.floor(v.fmPhase);
   var fm=Math.sin(2*Math.PI*v.fmPhase)*v.fmIndex/sr*2*Math.PI;
-  var mixed=s1*0.35+s2*0.35+Math.sin(2*Math.PI*v.phase+fm)*0.3;
-  var f2=v.filter.process(mixed,v.cutoff,v.res,sr);
-  return f2.band*v.ampEnv*v.gain*P.mixer.lead.vol*(P.mixer.lead.mute?0:1); }
-function rPad(sr){ var v=P.pad; if(!v.active)return 0; v.ampEnv*=0.99997;
-  if(v.ampEnv<0.001){v.active=false;return 0;} var sum=0;
+  var mixed=w*0.4+s1*0.25+s2*0.25+Math.sin(2*Math.PI*v.phase+fm)*0.1;
+  var f2=v.filter.process(mixed,cutoff,v.res,sr);
+  return f2.band*v.ampEnv*v.gain*v.vel*(0.7+lfo*0.3)*P.mixer.lead.vol*(P.mixer.lead.mute?0:1); }
+function rPad(sr,dt){ var v=P.pad; if(!v.active)return 0; v.ampEnv*=0.99997;
+  if(v.ampEnv<0.001){v.active=false;return 0;}
+  var lfo=P.padLFO.process(dt); // slow amp undulation
+  var cutoff=v.cutoff+lfo*200; if(cutoff<50)cutoff=50;
+  var sum=0;
   for(var i=0;i<7;i++){v.phases[i]+=(v.freq*v.detunes[i])/sr;v.phases[i]-=Math.floor(v.phases[i]);sum+=polyblepSaw(v.phases[i],(v.freq*v.detunes[i])/sr);}
-  sum/=7; var fp=v.filter.process(sum,v.cutoff,v.res,sr);
-  return fp.low*v.ampEnv*v.gain*P.mixer.pad.vol*(P.mixer.pad.mute?0:1); }
+  sum/=7; var fp=v.filter.process(sum,cutoff,v.res,sr);
+  return fp.low*v.ampEnv*v.gain*v.vel*(0.8+lfo*0.2)*P.mixer.pad.vol*(P.mixer.pad.mute?0:1); }
 function rHat(sr){ var v=P.hat; if(!v.active)return 0; v.ampEnv*=0.92;
-  if(v.ampEnv<0.001){v.active=false;return 0;} return noiseNext()*v.ampEnv*v.gain*P.mixer.drums.vol*(P.mixer.drums.mute?0:1)*0.5; }
+  if(v.ampEnv<0.001){v.active=false;return 0;} return noiseNext()*v.ampEnv*v.gain*v.vel*P.mixer.drums.vol*(P.mixer.drums.mute?0:1)*0.5; }
 function rClap(sr){ var v=P.clap; if(!v.active)return 0; v.ampEnv*=0.94; v.bursts+=1;
   if(v.ampEnv<0.001){v.active=false;return 0;}
   var burst=v.bursts<3?noiseNext()*(1-v.bursts/3):0; var body=noiseNext()*v.ampEnv*0.5;
-  return (burst*0.6+body)*v.gain*P.mixer.drums.vol*(P.mixer.drums.mute?0:1); }
+  return (burst*0.6+body)*v.gain*v.vel*P.mixer.drums.vol*(P.mixer.drums.mute?0:1); }
 function rSnare(sr){ var v=P.snare; if(!v.active)return 0; v.ampEnv*=0.97;
   if(v.ampEnv<0.001){v.active=false;return 0;} v.phase+=200/sr;v.phase-=Math.floor(v.phase);
-  return (Math.sin(2*Math.PI*v.phase)*0.4+noiseNext()*0.6)*v.ampEnv*v.gain*P.mixer.drums.vol*(P.mixer.drums.mute?0:1); }
+  return (Math.sin(2*Math.PI*v.phase)*0.4+noiseNext()*0.6)*v.ampEnv*v.gain*v.vel*P.mixer.drums.vol*(P.mixer.drums.mute?0:1); }
 function rCrash(sr){ var v=P.crash; if(!v.active)return 0; v.ampEnv*=0.9995;
-  if(v.ampEnv<0.001){v.active=false;return 0;} return noiseNext()*v.ampEnv*v.gain*P.mixer.drums.vol*(P.mixer.drums.mute?0:1)*0.4; }
+  if(v.ampEnv<0.001){v.active=false;return 0;} return noiseNext()*v.ampEnv*v.gain*v.vel*P.mixer.drums.vol*(P.mixer.drums.mute?0:1)*0.4; }
 
 function masterProcess(x, sr){
   if(!P.reverb) P.reverb = new Reverb(sr);
@@ -728,12 +846,18 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       while(P.playing&&t>=P.nextBarTime){ P.barIndex++;P.tension=getTension(P.barIndex);P.section=getSection(P.barIndex);P.currentPlan=planBar();P.currentBarStart=P.nextBarTime;P.nextBarTime+=barDur; }
       if(P.playing&&P.currentPlan&&P.currentPlan.steps){
         var stepInBar=Math.floor((t-P.currentBarStart)/stepDur);
-        if(stepInBar>=0&&stepInBar<16){ var step=P.currentPlan.steps[stepInBar]; var stepStart=P.currentBarStart+stepInBar*stepDur;
+        if(stepInBar>=0&&stepInBar<16){ var step=P.currentPlan.steps[stepInBar];
+          // swing: delay odd 16th notes by (swing-0.5)*stepDur
+          var swingOffset = (stepInBar % 2 === 1) ? (P.swing - 0.5) * stepDur * 2 : 0;
+          var stepStart=P.currentBarStart+stepInBar*stepDur+swingOffset;
           if(t>=stepStart&&t<stepStart+stepDur&&!step._trig){ step._trig=true;
-            if(step.kick)triggerKick(); if(step.bassNote!==null)triggerBass(step.bassNote);
-            if(step.leadNote!==null)triggerLead(step.leadNote); if(step.padNote!==null)triggerPad(step.padNote);
-            if(step.hat)triggerHat(); if(step.clap)triggerClap(); if(step.snare)triggerSnare(); if(step.crash)triggerCrash(); } } }
-      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr);s+=rLead(sr);s+=rPad(sr);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);
+            // swing: delay odd 16th notes (shift timing by swing amount)
+            // humanization: velocity jitter + timing jitter
+            var vel = 0.7 + P.rng() * 0.3 * P.humanize + (1 - P.humanize) * 0.3;
+            if(step.kick)triggerKick(vel); if(step.bassNote!==null)triggerBass(step.bassNote, vel);
+            if(step.leadNote!==null)triggerLead(step.leadNote, vel); if(step.padNote!==null)triggerPad(step.padNote, vel);
+            if(step.hat)triggerHat(vel * 0.6); if(step.clap)triggerClap(vel); if(step.snare)triggerSnare(vel); if(step.crash)triggerCrash(vel * 0.8); } } }
+      var s=0; s+=rKick(sr);s+=rSub(sr);s+=rBass(sr,dt);s+=rLead(sr,dt);s+=rPad(sr,dt);s+=rHat(sr);s+=rClap(sr);s+=rSnare(sr);s+=rCrash(sr);
       P.sidechainGain=P.sidechainGain*0.997+1.0*0.003;
       s=masterProcess(s,sr);
       out[0][i]=s;out[1][i]=s;
