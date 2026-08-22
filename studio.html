@@ -1159,12 +1159,112 @@ class Resonator {
     var out = 0;
     var baseFreq = 220;
     for(var i = 0; i < this.modes; i++){
-      // modal frequencies: 1x, 1.5x, 2x, 2.7x, 4x (inharmonic — like a bell)
       var freq = baseFreq * [1, 1.5, 2, 2.7, 4][i];
-      var mode = this.filters[i].process(input, freq, 0.95, sr); // high resonance
+      var mode = this.filters[i].process(input, freq, 0.95, sr);
       out += mode.band * this.decay;
     }
     return input * (1 - this.amount) + out * this.amount;
+  }
+}
+
+// ── Wavefolder (analog-style complex distortion) ──
+class Wavefolder {
+  constructor(){ this.fold = 0.5; this.dcBlock = 0; }
+  process(input){
+    var x = input * (1 + this.fold * 4);
+    // fold: mirror at ±1
+    while(Math.abs(x) > 1){
+      if(x > 1) x = 2 - x;
+      else if(x < -1) x = -2 - x;
+    }
+    // DC blocker
+    this.dcBlock = this.dcBlock * 0.995 + x * 0.005;
+    return x - this.dcBlock;
+  }
+}
+
+// ── Ensemble effect (super-chorus — 3 detuned voices for strings) ──
+class Ensemble {
+  constructor(sr){
+    this.voices = [];
+    for(var i = 0; i < 3; i++){
+      this.voices.push({
+        buf: new Float32Array(Math.floor(sr * 0.05)),
+        idx: 0,
+        lfo: i * 2.1, // phase offset
+        rate: 0.3 + i * 0.1,
+        depth: 0.02 + i * 0.005
+      });
+    }
+    this.amount = 0.3;
+    this.sr = sr;
+  }
+  process(input, sr){
+    if(this.amount <= 0) return input;
+    var wet = 0;
+    for(var v = 0; v < 3; v++){
+      var voice = this.voices[v];
+      voice.lfo += voice.rate / sr * 2 * Math.PI;
+      voice.lfo -= Math.floor(voice.lfo);
+      var delay = (0.015 + voice.depth * Math.sin(voice.lfo)) * sr;
+      var readIdx = voice.idx - delay + voice.buf.length;
+      readIdx = ((readIdx % voice.buf.length) + voice.buf.length) % voice.buf.length;
+      var i0 = Math.floor(readIdx), i1 = (i0 + 1) % voice.buf.length;
+      var frac = readIdx - i0;
+      var delayed = voice.buf[i0] * (1 - frac) + voice.buf[i1] * frac;
+      voice.buf[voice.idx] = input;
+      voice.idx = (voice.idx + 1) % voice.buf.length;
+      wet += delayed;
+    }
+    wet /= 3;
+    return input * (1 - this.amount) + wet * this.amount;
+  }
+}
+
+// ── Spring reverb (physical modeling — waveguide simulation) ──
+class SpringReverb {
+  constructor(sr){
+    // waveguide: delay line + dispersion + feedback
+    var delayLen = Math.floor(sr * 0.04); // 40ms base delay
+    this.buf = new Float32Array(delayLen);
+    this.idx = 0;
+    this.delayLen = delayLen;
+    // dispersion filter (low-pass to simulate spring stiffness)
+    this.dispState = 0;
+    this.feedback = 0.5;
+    this.wet = 0.3;
+  }
+  process(input, sr){
+    var readIdx = this.idx;
+    var delayed = this.buf[readIdx];
+    // dispersion: lowpass the delayed signal
+    this.dispState = this.dispState * 0.7 + delayed * 0.3;
+    var dispersed = this.dispState;
+    // feedback loop
+    var fbInput = input + dispersed * this.feedback;
+    this.buf[this.idx] = fbInput;
+    this.idx = (this.idx + 1) % this.delayLen;
+    return input * (1 - this.wet) + dispersed * this.wet;
+  }
+}
+
+// ── Frequency shifter (single-sideband modulation) ──
+class FrequencyShifter {
+  constructor(){
+    this.phaseI = 0; // in-phase
+    this.phaseQ = 0; // quadrature
+    this.shift = 0; // Hz shift
+  }
+  process(input, sr){
+    if(Math.abs(this.shift) < 1) return input;
+    this.phaseI += this.shift / sr * 2 * Math.PI;
+    this.phaseQ += this.shift / sr * 2 * Math.PI + Math.PI / 2;
+    this.phaseI -= Math.floor(this.phaseI);
+    this.phaseQ -= Math.floor(this.phaseQ);
+    // simplified SSB: multiply by complex oscillator (approximate)
+    var cosI = Math.cos(2 * Math.PI * this.phaseI);
+    var sinQ = Math.sin(2 * Math.PI * this.phaseQ);
+    return input * cosI * 0.5 + input * sinQ * 0.5;
   }
 }
 
@@ -1235,6 +1335,10 @@ var P = {
   exciter: null,          // harmonic exciter
   tapeEcho: null,        // tape echo
   resonator: null,        // resonator (modal)
+  wavefolder: null,        // wavefolder distortion
+  ensemble: null,           // ensemble (super-chorus)
+  springReverb: null,      // spring reverb
+  freqShifter: null,       // frequency shifter
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -1711,6 +1815,26 @@ function masterProcess(x, sr){
       x = P.resonator.process(x, sr);
     }
     x = P.comp.process(x, 0.126, 4, 5, 50, sr);
+    // wavefolder: complex distortion in BREAK + RISER
+    if(P.wavefolder && phase >= 16 && phase < 24){
+      P.wavefolder.fold = 0.15 + P.tension * 0.2;
+      x = P.wavefolder.process(x) * 0.5 + x * 0.5; // 50% wet
+    }
+    // ensemble: super-chorus on pad/strings (always on, subtle)
+    if(P.ensemble){
+      P.ensemble.amount = P.macroSpace * 0.2;
+      x = P.ensemble.process(x, sr);
+    }
+    // spring reverb: metallic character in BREAK
+    if(P.springReverb && phase >= 16 && phase < 20){
+      P.springReverb.wet = 0.15;
+      x = P.springReverb.process(x, sr);
+    }
+    // frequency shifter: subtle detuning in DROP2
+    if(P.freqShifter && phase >= 24){
+      P.freqShifter.shift = 5 + Math.sin(currentTime * 0.3) * 10; // 5-15Hz
+      x = P.freqShifter.process(x, sr);
+    }
     x *= 1.2;
     // hard limiter
     if(x > 0.95) x = 0.95; if(x < -0.95) x = -0.95;
@@ -1770,6 +1894,10 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(!P.exciter) P.exciter = new HarmonicExciter();
       if(!P.tapeEcho) P.tapeEcho = new TapeEcho(sr);
       if(!P.resonator) P.resonator = new Resonator();
+      if(!P.wavefolder) P.wavefolder = new Wavefolder();
+      if(!P.ensemble) P.ensemble = new Ensemble(sr);
+      if(!P.springReverb) P.springReverb = new SpringReverb(sr);
+      if(!P.freqShifter) P.freqShifter = new FrequencyShifter();
       P._inited = true;
     }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
