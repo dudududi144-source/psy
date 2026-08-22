@@ -1873,33 +1873,134 @@ class SpectralFreeze {
 // ── Cabinet simulator (guitar amp impulse response — simplified) ──
 class CabinetSim {
   constructor(sr){
-    // pre-generated cabinet IR (combination of resonances + cone breakup)
-    var irLen = Math.floor(sr * 0.05); // 50ms IR
+    var irLen = Math.floor(sr * 0.05);
     this.ir = new Float32Array(irLen);
     for(var i = 0; i < irLen; i++){
       var decay = Math.exp(-i / (irLen * 0.3));
-      // speaker cone resonance ~80Hz + ~2kHz cone breakup
       this.ir[i] = (Math.sin(2 * Math.PI * 80 * i / sr) * 0.3 +
                     Math.sin(2 * Math.PI * 2000 * i / sr) * 0.15 +
                     (Math.random() * 2 - 1) * 0.1) * decay;
     }
     this.buf = new Float32Array(irLen);
-    this.idx = 0;
-    this.irLen = irLen;
-    this.wet = 0;
+    this.idx = 0; this.irLen = irLen; this.wet = 0;
   }
   process(input, sr){
     if(this.wet <= 0) return input;
     this.buf[this.idx] = input;
-    // simplified convolution (downsampled for CPU)
-    var out = 0;
-    var step = 2; // 2x downsample
+    var out = 0, step = 2;
     for(var i = 0; i < this.irLen; i += step){
       var readIdx = (this.idx - i + this.irLen) % this.irLen;
       out += this.buf[readIdx] * this.ir[i];
     }
     this.idx = (this.idx + 1) % this.irLen;
     return input * (1 - this.wet) + out * this.wet * 0.5;
+  }
+}
+
+// ── Vinyl crackle generator (lo-fi texture — pops + hiss + wow) ──
+class VinylCrackle {
+  constructor(sr){
+    this.sr = sr;
+    this.cracklePhase = 0;
+    this.crackleRate = 5; // pops per second
+    this.hissPhase = 0;
+    this.hissGain = 0.003;
+    this.wowPhase = 0;
+    this.wowRate = 0.5; // Hz (pitch wobble)
+    this.wowDepth = 0.001;
+    this.amount = 0;
+    this.prevDelay = 0;
+    this.buf = new Float32Array(64); // tiny buffer for wow
+    this.bufIdx = 0;
+  }
+  process(input, sr){
+    if(this.amount <= 0) return input;
+    // random pops (vinyl crackle)
+    this.cracklePhase += this.crackleRate / sr;
+    var crackle = 0;
+    if(this.cracklePhase >= 1){
+      this.cracklePhase -= 1;
+      crackle = (Math.random() * 2 - 1) * 0.3 * this.amount;
+    }
+    // continuous hiss (filtered noise)
+    var hiss = (Math.random() * 2 - 1) * this.hissGain * this.amount;
+    // wow/flutter (slow pitch wobble)
+    this.wowPhase += this.wowRate / sr * 2 * Math.PI;
+    this.wowPhase -= Math.floor(this.wowPhase);
+    var wow = Math.sin(this.wowPhase) * this.wowDepth * this.amount;
+    // apply wow via tiny delay modulation
+    this.buf[this.bufIdx] = input;
+    this.bufIdx = (this.bufIdx + 1) % this.buf.length;
+    var readOffset = Math.floor(wow * sr);
+    var readIdx = (this.bufIdx - 1 - readOffset + this.buf.length) % this.buf.length;
+    var wowOut = this.buf[readIdx];
+    return wowOut + crackle + hiss;
+  }
+}
+
+// ── Tape saturation model (analog emulation — hysteresis + saturation) ──
+class TapeSaturation {
+  constructor(){
+    this.drive = 0.3;
+    this.saturation = 0.5;
+    this.hysteresis = 0; // state for hysteresis
+    this.hystAmount = 0.2;
+    this.prevInput = 0;
+  }
+  process(input){
+    // hysteresis: output depends on direction of input change
+    var direction = input > this.prevInput ? 1 : -1;
+    var hysteretic = input + this.hystAmount * direction * Math.abs(input - this.prevInput) * 0.1;
+    this.prevInput = input;
+    // saturation curve (tape-like: soft knee, asymmetric)
+    var x = hysteretic * (1 + this.drive * 2);
+    var pos = x > 0 ? x : x * 0.9; // asymmetric (tape biases positive)
+    var saturated = pos / (1 + Math.abs(pos) * this.saturation * 2);
+    return saturated;
+  }
+}
+
+// ── Frequency-conscious expander (expand only specific frequency range) ──
+class FreqExpander {
+  constructor(){
+    this.filter = new ZdfSvf();
+    this.env = 0;
+    this.threshold = 0.05;
+    this.ratio = 1.5; // expansion ratio
+    this.freq = 200; // expand below 200Hz (clean up low rumble)
+  }
+  process(input, sr){
+    // detect energy at target frequency
+    var bandSignal = this.filter.process(input, this.freq, 0.7, sr).low;
+    var absBand = Math.abs(bandSignal);
+    this.env = this.env * 0.99 + absBand * 0.01;
+    // expand: if below threshold, reduce
+    var gain = 1.0;
+    if(this.env < this.threshold){
+      gain = Math.max(0.0, this.env / this.threshold);
+      gain = Math.pow(gain, this.ratio / 2);
+    }
+    return input - bandSignal * (1 - gain) * 0.5; // partially remove the band
+  }
+}
+
+// ── Multiband harmonic exciter (per-band HF generation) ──
+class MultibandExciter {
+  constructor(){
+    this.lowF = new ZdfSvf(); this.midF = new ZdfSvf(); this.highF = new ZdfSvf();
+    this.amount = 0.2;
+  }
+  process(input, sr){
+    if(this.amount <= 0) return input;
+    // 3-band: isolate each
+    var low = this.lowF.process(input, 300, 0.5, sr).high; // HF of low band
+    var mid = this.midF.process(input, 1500, 0.5, sr).high; // HF of mid
+    var high = this.highF.process(input, 5000, 0.5, sr).high; // HF of high
+    // saturate each to generate harmonics
+    var lowHarm = Math.tanh(low * 4) * 0.2;
+    var midHarm = Math.tanh(mid * 4) * 0.15;
+    var highHarm = Math.tanh(high * 4) * 0.1;
+    return input + (lowHarm + midHarm + highHarm) * this.amount;
   }
 }
 
@@ -1999,6 +2100,10 @@ var P = {
   tzFlanger: null,            // through-zero flanger
   spectralFreeze: null,      // spectral freeze (smear)
   cabinet: null,              // cabinet simulator
+  vinylCrackle: null,        // vinyl crackle
+  tapeSaturation: null,      // tape saturation model
+  freqExpander: null,        // frequency-conscious expander
+  mbExciter: null,            // multiband harmonic exciter
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -2464,8 +2569,12 @@ function masterProcess(x, sr){
     x = Math.tanh(x * (1 + drive * 3)) / Math.tanh(1 + drive * 3);
     // saturator (tape mode — warm harmonic saturation)
     if(P.saturator){ P.saturator.drive = 0.2 + P.macroTension * 0.3; x = P.saturator.process(x); }
+    // tape saturation (hysteresis + asymmetric saturation — analog emulation)
+    if(P.tapeSaturation){ P.tapeSaturation.drive = 0.15 + P.macroTension * 0.2; x = P.tapeSaturation.process(x); }
     // multi-band distortion (per-band saturation for richer harmonics)
     if(P.mbDistortion){ P.mbDistortion.amount = 0.05 + P.energy * 0.1; x = P.mbDistortion.process(x, sr); }
+    // frequency-conscious expander (cleans up low rumble below 200Hz)
+    if(P.freqExpander) x = P.freqExpander.process(x, sr);
     // sub-harmonic synth (adds sub-octave from signal)
     if(P.subHarmonic){ P.subHarmonic.amount = P.energy * 0.2; x = P.subHarmonic.process(x, sr); }
     // harmonic generator (sub-bass from fundamental detection)
@@ -2474,6 +2583,8 @@ function masterProcess(x, sr){
     if(P.bassEnhancer){ P.bassEnhancer.amount = 0.1 + P.energy * 0.15; x = P.bassEnhancer.process(x, sr); }
     // harmonic exciter (high-frequency enhancement)
     if(P.exciter){ P.exciter.amount = 0.15 + P.macroBrightness * 0.2; x = P.exciter.process(x, sr); }
+    // multiband exciter (per-band HF generation — richer than single-band)
+    if(P.mbExciter){ P.mbExciter.amount = 0.05 + P.macroBrightness * 0.1; x = P.mbExciter.process(x, sr); }
     // de-esser (tames sibilance 7kHz)
     if(P.deEsser) x = P.deEsser.process(x, sr);
     // transient shaper (attack boost + sustain control)
@@ -2506,6 +2617,11 @@ function masterProcess(x, sr){
     if(P.spectralFreeze) x = P.spectralFreeze.process(x, sr);
     // cabinet simulator (always on, subtle — adds speaker character)
     if(P.cabinet){ P.cabinet.wet = 0.08; x = P.cabinet.process(x, sr); }
+    // vinyl crackle (lo-fi texture — pops + hiss + wow in BREAK)
+    if(P.vinylCrackle && phase >= 16 && phase < 20){
+      P.vinylCrackle.amount = 0.3;
+      x = P.vinylCrackle.process(x, sr);
+    } else if(P.vinylCrackle) { P.vinylCrackle.amount = 0; }
     // resonator (adds modal character in BREAK)
     if(P.resonator){
       P.resonator.amount = (phase >= 16 && phase < 20) ? 0.3 : 0.05;
@@ -2641,6 +2757,10 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(!P.tzFlanger) P.tzFlanger = new ThroughZeroFlanger(sr);
       if(!P.spectralFreeze) P.spectralFreeze = new SpectralFreeze(sr);
       if(!P.cabinet) P.cabinet = new CabinetSim(sr);
+      if(!P.vinylCrackle) P.vinylCrackle = new VinylCrackle(sr);
+      if(!P.tapeSaturation) P.tapeSaturation = new TapeSaturation();
+      if(!P.freqExpander) P.freqExpander = new FreqExpander();
+      if(!P.mbExciter) P.mbExciter = new MultibandExciter();
       P._inited = true;
     }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
