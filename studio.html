@@ -1758,31 +1758,148 @@ class AcidSweep {
 // ── True peak limiter (oversampled ISP detection) ──
 class TruePeakLimiter {
   constructor(){
-    this.ceiling = 0.95;
-    this.oversample = 2; // 2x oversampling for ISP detection
-    this.prevSample = 0;
-    this.gain = 1.0;
-    this.releaseRate = 0.0005;
+    this.ceiling = 0.95; this.prevSample = 0; this.gain = 1.0; this.releaseRate = 0.0005;
   }
   process(input, sr){
-    // detect inter-sample peaks via linear interpolation
-    // midpoint between prev and current = potential ISP
     var midpoint = (this.prevSample + input) * 0.5;
     var peak = Math.abs(midpoint);
-    // also check current sample
     if(Math.abs(input) > peak) peak = Math.abs(input);
-    // compute target gain
     var targetGain = 1.0;
-    if(peak * this.gain > this.ceiling){
-      targetGain = this.ceiling / Math.max(0.001, peak);
-    }
-    if(targetGain < this.gain){
-      this.gain = targetGain; // instant attack
-    } else {
-      this.gain = Math.min(1.0, this.gain + this.releaseRate); // slow release
-    }
+    if(peak * this.gain > this.ceiling) targetGain = this.ceiling / Math.max(0.001, peak);
+    if(targetGain < this.gain) this.gain = targetGain;
+    else this.gain = Math.min(1.0, this.gain + this.releaseRate);
     this.prevSample = input;
     return input * this.gain;
+  }
+}
+
+// ── Multi-tap delay (rhythmic delay patterns — 8 taps at musical divisions) ──
+class MultiTapDelay {
+  constructor(sr){
+    this.bufSize = Math.floor(sr * 2.0); // 2s max
+    this.buf = new Float32Array(this.bufSize);
+    this.idx = 0;
+    // 8 taps at rhythmic divisions (relative to 1/4 note at ~144bpm = 0.417s)
+    var beat = 60 / 144;
+    this.taps = [
+      { delay: beat * 0.25, gain: 0.6 },   // 1/16
+      { delay: beat * 0.375, gain: 0.5 },  // 1/16 dotted
+      { delay: beat * 0.5, gain: 0.55 },   // 1/8
+      { delay: beat * 0.75, gain: 0.4 },    // 1/8 dotted
+      { delay: beat * 1.0, gain: 0.45 },    // 1/4
+      { delay: beat * 1.5, gain: 0.3 },     // 1/4 dotted
+      { delay: beat * 2.0, gain: 0.25 },     // 1/2
+      { delay: beat * 3.0, gain: 0.15 },     // 1/2 dotted
+    ];
+    this.feedback = 0.3;
+    this.wet = 0.1;
+  }
+  process(input, sr){
+    this.buf[this.idx] = input;
+    var wet = 0;
+    for(var i = 0; i < this.taps.length; i++){
+      var tap = this.taps[i];
+      var readIdx = (this.idx - Math.floor(tap.delay * sr) + this.bufSize) % this.bufSize;
+      wet += this.buf[readIdx] * tap.gain;
+    }
+    // feedback into buffer
+    this.buf[this.idx] = input + wet * this.feedback;
+    this.idx = (this.idx + 1) % this.bufSize;
+    return input * (1 - this.wet) + wet * this.wet;
+  }
+}
+
+// ── Through-zero flanger (negative feedback — jet engine effect) ──
+class ThroughZeroFlanger {
+  constructor(sr){
+    this.bufSize = Math.floor(sr * 0.02); // 20ms max delay
+    this.buf = new Float32Array(this.bufSize);
+    this.idx = 0;
+    this.lfo = 0;
+    this.rate = 0.2; // Hz (slow sweep)
+    this.depth = 0.8;
+    this.feedback = -0.7; // NEGATIVE feedback (through-zero)
+    this.wet = 0;
+    this.lastWet = 0;
+  }
+  process(input, sr){
+    if(this.wet <= 0) return input;
+    this.lfo += this.rate / sr * 2 * Math.PI;
+    this.lfo -= Math.floor(this.lfo);
+    // delay from 0 to 10ms (through-zero when delay approaches 0)
+    var delay = (0.5 + 0.5 * Math.sin(this.lfo)) * 0.01 * sr;
+    delay = Math.max(1, Math.min(delay, this.bufSize - 1));
+    var readIdx = this.idx - delay + this.bufSize;
+    readIdx = ((readIdx % this.bufSize) + this.bufSize) % this.bufSize;
+    var i0 = Math.floor(readIdx), i1 = (i0 + 1) % this.bufSize;
+    var frac = readIdx - i0;
+    var delayed = this.buf[i0] * (1 - frac) + this.buf[i1] * frac;
+    // negative feedback
+    this.buf[this.idx] = input + delayed * this.feedback;
+    this.idx = (this.idx + 1) % this.bufSize;
+    this.lastWet = delayed;
+    // mix: dry + delayed (comb filter sweep)
+    return input * (1 - this.wet * this.depth) + delayed * this.wet * this.depth;
+  }
+}
+
+// ── Spectral freeze (smear/blur — holds spectrum briefly) ──
+class SpectralFreeze {
+  constructor(sr){
+    this.bufSize = Math.floor(sr * 0.5); // 500ms buffer
+    this.buf = new Float32Array(this.bufSize);
+    this.idx = 0;
+    this.frozen = false;
+    this.freezeLevel = 0;
+    this.readPos = 0;
+    this.freezeRate = 0.5; // playback speed (0.5 = half speed = blur)
+  }
+  triggerFreeze(){ this.frozen = true; this.freezeLevel = 1; this.readPos = 0; }
+  process(input, sr){
+    if(!this.frozen) return input;
+    // read from buffer at slow rate (creates smeared/sustained sound)
+    this.readPos += this.freezeRate;
+    if(this.readPos >= this.bufSize){ this.readPos = 0; this.frozen = false; this.freezeLevel = 0; }
+    var i0 = Math.floor(this.readPos), i1 = (i0 + 1) % this.bufSize;
+    var frac = this.readPos - i0;
+    var wet = this.buf[i0] * (1 - frac) + this.buf[i1] * frac;
+    // fade out freeze
+    this.freezeLevel *= 0.9999;
+    if(this.freezeLevel < 0.01) this.frozen = false;
+    return input * (1 - this.freezeLevel * 0.5) + wet * this.freezeLevel * 0.5;
+  }
+}
+
+// ── Cabinet simulator (guitar amp impulse response — simplified) ──
+class CabinetSim {
+  constructor(sr){
+    // pre-generated cabinet IR (combination of resonances + cone breakup)
+    var irLen = Math.floor(sr * 0.05); // 50ms IR
+    this.ir = new Float32Array(irLen);
+    for(var i = 0; i < irLen; i++){
+      var decay = Math.exp(-i / (irLen * 0.3));
+      // speaker cone resonance ~80Hz + ~2kHz cone breakup
+      this.ir[i] = (Math.sin(2 * Math.PI * 80 * i / sr) * 0.3 +
+                    Math.sin(2 * Math.PI * 2000 * i / sr) * 0.15 +
+                    (Math.random() * 2 - 1) * 0.1) * decay;
+    }
+    this.buf = new Float32Array(irLen);
+    this.idx = 0;
+    this.irLen = irLen;
+    this.wet = 0;
+  }
+  process(input, sr){
+    if(this.wet <= 0) return input;
+    this.buf[this.idx] = input;
+    // simplified convolution (downsampled for CPU)
+    var out = 0;
+    var step = 2; // 2x downsample
+    for(var i = 0; i < this.irLen; i += step){
+      var readIdx = (this.idx - i + this.irLen) % this.irLen;
+      out += this.buf[readIdx] * this.ir[i];
+    }
+    this.idx = (this.idx + 1) % this.irLen;
+    return input * (1 - this.wet) + out * this.wet * 0.5;
   }
 }
 
@@ -1878,6 +1995,10 @@ var P = {
   gatedReverb: null,         // gated reverb (Phil Collins)
   acidSweep: null,            // acid 303 filter sweep
   truePeakLimiter: null,     // true peak limiter (ISP)
+  multiTap: null,             // multi-tap delay
+  tzFlanger: null,            // through-zero flanger
+  spectralFreeze: null,      // spectral freeze (smear)
+  cabinet: null,              // cabinet simulator
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -2370,6 +2491,21 @@ function masterProcess(x, sr){
       P.tapeEcho.wet = 0.08 + P.macroSpace * 0.1;
       x = P.tapeEcho.process(x, sr);
     }
+    // multi-tap delay (rhythmic — always on, subtle)
+    if(P.multiTap){ P.multiTap.wet = 0.05 + P.macroSpace * 0.08; x = P.multiTap.process(x, sr); }
+    // through-zero flanger (RISER section — jet engine sweep)
+    if(P.tzFlanger && phase >= 20 && phase < 24){
+      P.tzFlanger.wet = 0.15 + P.tension * 0.1;
+      P.tzFlanger.rate = 0.15 + P.tension * 0.2;
+      x = P.tzFlanger.process(x, sr);
+    }
+    // spectral freeze (BREAK — smears sound briefly)
+    if(P.spectralFreeze && phase >= 16 && phase < 20 && (P.barIndex % 4 === 0)){
+      P.spectralFreeze.triggerFreeze();
+    }
+    if(P.spectralFreeze) x = P.spectralFreeze.process(x, sr);
+    // cabinet simulator (always on, subtle — adds speaker character)
+    if(P.cabinet){ P.cabinet.wet = 0.08; x = P.cabinet.process(x, sr); }
     // resonator (adds modal character in BREAK)
     if(P.resonator){
       P.resonator.amount = (phase >= 16 && phase < 20) ? 0.3 : 0.05;
@@ -2501,6 +2637,10 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(!P.gatedReverb) P.gatedReverb = new GatedReverb(sr);
       if(!P.acidSweep) P.acidSweep = new AcidSweep();
       if(!P.truePeakLimiter) P.truePeakLimiter = new TruePeakLimiter();
+      if(!P.multiTap) P.multiTap = new MultiTapDelay(sr);
+      if(!P.tzFlanger) P.tzFlanger = new ThroughZeroFlanger(sr);
+      if(!P.spectralFreeze) P.spectralFreeze = new SpectralFreeze(sr);
+      if(!P.cabinet) P.cabinet = new CabinetSim(sr);
       P._inited = true;
     }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
