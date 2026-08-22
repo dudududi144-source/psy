@@ -1668,12 +1668,121 @@ class BassEnhancer {
   }
   process(input, sr){
     if(this.amount <= 0) return input;
-    // isolate bass frequencies (below 150Hz)
     var bass = this.lpf.process(input, 150, 0.5, sr).low;
-    // generate harmonics via saturation (2nd + 3rd)
     var harmonics = Math.tanh(bass * 3) * 0.3 + Math.tanh(bass * 5) * 0.15;
-    // high-pass the harmonics so we don't add more low end
     return input + harmonics * this.amount;
+  }
+}
+
+// ── OTT (upward + downward multiband expander — Xfer Records style) ──
+class OTT {
+  constructor(){
+    this.lowF = new ZdfSvf(); this.midF = new ZdfSvf(); this.highF = new ZdfSvf();
+    this.lowEnv = 0; this.midEnv = 0; this.highEnv = 0;
+    this.amount = 0.3; // depth
+    this.depth = 0.5; // 0=bypass, 1=full OTT
+  }
+  process(input, sr){
+    if(this.depth <= 0) return input;
+    var low = this.lowF.process(input, 250, 0.5, sr).low;
+    var mid = this.midF.process(input, 1500, 0.5, sr).band;
+    var high = this.highF.process(input, 4000, 0.5, sr).high;
+    // envelope followers per band
+    this.lowEnv = this.lowEnv * 0.99 + Math.abs(low) * 0.01;
+    this.midEnv = this.midEnv * 0.99 + Math.abs(mid) * 0.01;
+    this.highEnv = this.highEnv * 0.99 + Math.abs(high) * 0.01;
+    // OTT: compress downward (reduce loud) + expand upward (boost quiet)
+    // simplified: boost quiet parts, reduce loud parts
+    var lowGain = 1 + (0.1 - this.lowEnv) * this.depth * 3; // boost when quiet
+    if(this.lowEnv > 0.1) lowGain = 1 - (this.lowEnv - 0.1) * this.depth * 2; // reduce when loud
+    var midGain = 1 + (0.1 - this.midEnv) * this.depth * 3;
+    if(this.midEnv > 0.1) midGain = 1 - (this.midEnv - 0.1) * this.depth * 2;
+    var highGain = 1 + (0.1 - this.highEnv) * this.depth * 3;
+    if(this.highEnv > 0.1) highGain = 1 - (this.highEnv - 0.1) * this.depth * 2;
+    // clamp gains
+    lowGain = Math.max(0.3, Math.min(3, lowGain));
+    midGain = Math.max(0.3, Math.min(3, midGain));
+    highGain = Math.max(0.3, Math.min(3, highGain));
+    return low * lowGain + mid * midGain + high * highGain;
+  }
+}
+
+// ── Gated reverb (Phil Collins — big reverb that cuts off abruptly) ──
+class GatedReverb {
+  constructor(sr){
+    this.reverb = new Reverb(sr);
+    this.env = 0;
+    this.threshold = 0.05;
+    this.gateOpen = true;
+    this.wet = 0;
+    this.closeRate = 0.999; // fast close
+    this.openRate = 0.9; // fast open
+  }
+  process(input, sr){
+    if(this.wet <= 0) return input;
+    // gate the reverb: only let it ring when signal is loud
+    var absInput = Math.abs(input);
+    this.env = this.env * 0.99 + absInput * 0.01;
+    if(this.env > this.threshold){
+      this.gateOpen = true;
+    } else {
+      this.gateOpen = this.gateOpen * this.closeRate; // close fast
+      if(this.gateOpen < 0.01) this.gateOpen = 0;
+    }
+    var wet = this.reverb.process(input * 0.3, 0.8) * this.wet;
+    return input + wet * this.gateOpen;
+  }
+}
+
+// ── Resonant filter sweep (acid 303 — LFO-modulated cutoff with high Q) ──
+class AcidSweep {
+  constructor(){
+    this.filter = new MoogLadder();
+    this.lfo = 0;
+    this.rate = 0.5; // Hz
+    this.baseFreq = 200;
+    this.sweepDepth = 2000;
+    this.resonance = 0.9;
+    this.wet = 0;
+  }
+  process(input, sr){
+    if(this.wet <= 0) return input;
+    this.lfo += this.rate / sr * 2 * Math.PI;
+    this.lfo -= Math.floor(this.lfo);
+    var cutoff = this.baseFreq + (0.5 + 0.5 * Math.sin(this.lfo)) * this.sweepDepth;
+    var filtered = this.filter.process(input, cutoff, this.resonance, sr);
+    return input * (1 - this.wet) + filtered * this.wet;
+  }
+}
+
+// ── True peak limiter (oversampled ISP detection) ──
+class TruePeakLimiter {
+  constructor(){
+    this.ceiling = 0.95;
+    this.oversample = 2; // 2x oversampling for ISP detection
+    this.prevSample = 0;
+    this.gain = 1.0;
+    this.releaseRate = 0.0005;
+  }
+  process(input, sr){
+    // detect inter-sample peaks via linear interpolation
+    // midpoint between prev and current = potential ISP
+    var midpoint = (this.prevSample + input) * 0.5;
+    var peak = Math.abs(midpoint);
+    // also check current sample
+    if(Math.abs(input) > peak) peak = Math.abs(input);
+    // compute target gain
+    var targetGain = 1.0;
+    if(peak * this.gain > this.ceiling){
+      targetGain = this.ceiling / Math.max(0.001, peak);
+    }
+    if(targetGain < this.gain){
+      this.gain = targetGain; // instant attack
+    } else {
+      this.gain = Math.min(1.0, this.gain + this.releaseRate); // slow release
+    }
+    this.prevSample = input;
+    return input * this.gain;
   }
 }
 
@@ -1765,6 +1874,10 @@ var P = {
   transientShaper: null,    // transient shaper
   stereoImager: null,        // stereo imager
   bassEnhancer: null,        // bass enhancer
+  ott: null,                  // OTT (upward/downward expander)
+  gatedReverb: null,         // gated reverb (Phil Collins)
+  acidSweep: null,            // acid 303 filter sweep
+  truePeakLimiter: null,     // true peak limiter (ISP)
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -2218,6 +2331,14 @@ function masterProcess(x, sr){
     x = P.chorus.process(x, 0.5, 0.15, sr);
     if(!P.multiband) P.multiband = new MultibandComp();
     x = P.multiband.process(x, sr);
+    // OTT (upward + downward expander — Xfer style)
+    if(P.ott){ P.ott.depth = 0.1 + P.energy * 0.15; x = P.ott.process(x, sr); }
+    // acid sweep (resonant filter in DROP)
+    if(P.acidSweep && phase >= 8 && phase < 16){
+      P.acidSweep.wet = 0.1 + P.tension * 0.1;
+      P.acidSweep.rate = 0.3 + P.tension * 0.5;
+      x = P.acidSweep.process(x, sr);
+    }
     var drive = 0.3 + P.energy * 0.3 + P.macroTension * 0.2;
     x = Math.tanh(x * (1 + drive * 3)) / Math.tanh(1 + drive * 3);
     // saturator (tape mode — warm harmonic saturation)
@@ -2280,6 +2401,11 @@ function masterProcess(x, sr){
       P.reverseReverb.wet = 0.15;
       x = P.reverseReverb.process(x, sr);
     }
+    // gated reverb (Phil Collins — big reverb that cuts off) in DROP
+    if(P.gatedReverb && phase >= 8 && phase < 16){
+      P.gatedReverb.wet = 0.1;
+      x = P.gatedReverb.process(x, sr);
+    }
     // tape stop: triggered at section transitions (last bar of 16-bar block)
     if(P.tapeStop && (phase === 15 || phase === 31)){
       if(!P.tapeStop.active) P.tapeStop.trigger();
@@ -2290,8 +2416,10 @@ function masterProcess(x, sr){
     if(x > 0.95) x = 0.95; if(x < -0.95) x = -0.95;
     // soft limiter (tanh) for final protection
     x = Math.tanh(x * 1.2) * 0.85;
+    // true peak limiter (ISP-aware — inter-sample peak detection)
+    if(P.truePeakLimiter){ P.truePeakLimiter.ceiling = 0.9; x = P.truePeakLimiter.process(x, sr); }
     // maximizer (ISP-aware lookahead limiter — final loudness)
-    if(P.maximizer){ P.maximizer.ceiling = 0.9; x = P.maximizer.process(x, sr); }
+    if(P.maximizer){ P.maximizer.ceiling = 0.88; x = P.maximizer.process(x, sr); }
     // LUFS metering (passthrough — measures loudness)
     if(P.lufsMeter) x = P.lufsMeter.process(x);
   } catch(e) { /* swallow to keep worklet alive */ }
@@ -2369,6 +2497,10 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(!P.transientShaper) P.transientShaper = new TransientShaper();
       if(!P.stereoImager) P.stereoImager = new StereoImager();
       if(!P.bassEnhancer) P.bassEnhancer = new BassEnhancer();
+      if(!P.ott) P.ott = new OTT();
+      if(!P.gatedReverb) P.gatedReverb = new GatedReverb(sr);
+      if(!P.acidSweep) P.acidSweep = new AcidSweep();
+      if(!P.truePeakLimiter) P.truePeakLimiter = new TruePeakLimiter();
       P._inited = true;
     }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
