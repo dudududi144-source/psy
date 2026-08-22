@@ -1036,28 +1036,23 @@ class Vocoder {
 // ── Convolution reverb (simplified — uses pre-generated impulse) ──
 class ConvolutionReverb {
   constructor(sr){
-    // generate simple impulse response (exponential decay noise)
-    var irLen = Math.floor(sr * 1.5); // 1.5s tail
+    var irLen = Math.floor(sr * 1.5);
     this.ir = new Float32Array(irLen);
     for(var i = 0; i < irLen; i++){
       var decay = Math.pow(1 - i / irLen, 2);
       this.ir[i] = (Math.random() * 2 - 1) * decay;
     }
-    // circular buffer for input
     this.bufSize = irLen;
     this.buf = new Float32Array(this.bufSize);
     this.idx = 0;
-    // partitioned convolution (simplified — direct FIR, expensive but correct)
     this.enabled = false;
     this.wet = 0.2;
   }
   process(input, sr){
     if(!this.enabled) return 0;
-    // store input
     this.buf[this.idx] = input;
-    // convolve with IR (downsampled for CPU: process every 4th sample)
     var out = 0;
-    var step = 4; // 4x downsampling of the IR for CPU efficiency
+    var step = 4;
     var irLen = Math.floor(this.ir.length / step);
     for(var i = 0; i < irLen; i++){
       var readIdx = (this.idx - i * step + this.bufSize) % this.bufSize;
@@ -1065,6 +1060,111 @@ class ConvolutionReverb {
     }
     this.idx = (this.idx + 1) % this.bufSize;
     return out * this.wet;
+  }
+}
+
+// ── Phaser (multi-stage allpass with LFO-modulated sweep) ──
+class Phaser {
+  constructor(sr){
+    this.stages = 6;
+    this.allpass = [];
+    for(var i = 0; i < this.stages; i++) this.allpass.push({ a1: 0, z1: 0 });
+    this.lfo = 0;
+    this.rate = 0.5; // Hz
+    this.depth = 0.5;
+    this.feedback = 0.3;
+    this.lastWet = 0;
+    this.sr = sr;
+  }
+  process(input, sr){
+    this.lfo += this.rate / sr * 2 * Math.PI;
+    this.lfo -= Math.floor(this.lfo);
+    var sweep = 0.5 + 0.5 * Math.sin(this.lfo); // 0..1
+    var minFreq = 200, maxFreq = 2000;
+    var freq = minFreq + sweep * (maxFreq - minFreq);
+    var phase = 2 * Math.PI * freq / sr;
+    var a1 = (1 - phase) / (1 + phase);
+    var x = input + this.lastWet * this.feedback;
+    for(var i = 0; i < this.stages; i++){
+      var ap = this.allpass[i];
+      var y = x * -a1 + ap.z1;
+      ap.z1 = y * a1 + x;
+      x = y;
+    }
+    this.lastWet = x;
+    return input * (1 - this.depth) + x * this.depth;
+  }
+}
+
+// ── Harmonic exciter (psychoacoustic high-frequency enhancement) ──
+class HarmonicExciter {
+  constructor(){
+    this.hpf = new ZdfSvf();
+    this.hpf2 = new ZdfSvf();
+    this.amount = 0.3;
+  }
+  process(input, sr){
+    if(this.amount <= 0) return input;
+    // high-pass at 4kHz to isolate highs
+    var hp1 = this.hpf.process(input, 4000, 0.5, sr).high;
+    var hp2 = this.hpf2.process(hp1, 6000, 0.5, sr).high;
+    // generate harmonics via saturation
+    var harmonics = Math.tanh(hp2 * 3) * 0.3;
+    return input + harmonics * this.amount;
+  }
+}
+
+// ── Tape echo (multi-head delay) ──
+class TapeEcho {
+  constructor(sr){
+    this.bufSize = Math.floor(sr * 1.0); // 1s buffer
+    this.buf = new Float32Array(this.bufSize);
+    this.idx = 0;
+    this.sr = sr;
+    // 3 heads at different positions (quarter, half, full)
+    this.heads = [
+      { delay: 0.125, gain: 0.5 },
+      { delay: 0.25, gain: 0.35 },
+      { delay: 0.5, gain: 0.2 }
+    ];
+    this.feedback = 0.4;
+    this.wet = 0.2;
+  }
+  process(input, sr){
+    this.buf[this.idx] = input;
+    var wet = 0;
+    for(var i = 0; i < this.heads.length; i++){
+      var head = this.heads[i];
+      var readIdx = (this.idx - Math.floor(head.delay * sr) + this.bufSize) % this.bufSize;
+      wet += this.buf[readIdx] * head.gain;
+    }
+    // feedback
+    this.buf[this.idx] = input + wet * this.feedback;
+    this.idx = (this.idx + 1) % this.bufSize;
+    return input * (1 - this.wet) + wet * this.wet;
+  }
+}
+
+// ── Resonator (modal synthesis — multiple resonant filters) ──
+class Resonator {
+  constructor(){
+    this.modes = 5;
+    this.filters = [];
+    for(var i = 0; i < this.modes; i++) this.filters.push(new ZdfSvf());
+    this.decay = 0.95;
+    this.amount = 0.3;
+  }
+  process(input, sr){
+    if(this.amount <= 0) return input;
+    var out = 0;
+    var baseFreq = 220;
+    for(var i = 0; i < this.modes; i++){
+      // modal frequencies: 1x, 1.5x, 2x, 2.7x, 4x (inharmonic — like a bell)
+      var freq = baseFreq * [1, 1.5, 2, 2.7, 4][i];
+      var mode = this.filters[i].process(input, freq, 0.95, sr); // high resonance
+      out += mode.band * this.decay;
+    }
+    return input * (1 - this.amount) + out * this.amount;
   }
 }
 
@@ -1131,6 +1231,10 @@ var P = {
   saturator: null,      // tape/tube saturator
   vocoder: null,         // vocoder
   convReverb: null,      // convolution reverb
+  phaser: null,           // phaser
+  exciter: null,          // harmonic exciter
+  tapeEcho: null,        // tape echo
+  resonator: null,        // resonator (modal)
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -1586,8 +1690,25 @@ function masterProcess(x, sr){
     if(P.saturator){ P.saturator.drive = 0.2 + P.macroTension * 0.3; x = P.saturator.process(x); }
     // sub-harmonic synth (adds sub-octave from signal)
     if(P.subHarmonic){ P.subHarmonic.amount = P.energy * 0.2; x = P.subHarmonic.process(x, sr); }
+    // harmonic exciter (high-frequency enhancement)
+    if(P.exciter){ P.exciter.amount = 0.15 + P.macroBrightness * 0.2; x = P.exciter.process(x, sr); }
     if(P.bitcrusher && phase >= 16 && phase < 20){
       x = P.bitcrusher.process(x, 12, 0.5, sr);
+    }
+    // phaser in BREAK + RISER
+    if(P.phaser && (phase >= 16 && phase < 24)){
+      P.phaser.rate = 0.3 + P.tension * 0.5;
+      x = P.phaser.process(x, sr);
+    }
+    // tape echo (always on, subtle)
+    if(P.tapeEcho){
+      P.tapeEcho.wet = 0.08 + P.macroSpace * 0.1;
+      x = P.tapeEcho.process(x, sr);
+    }
+    // resonator (adds modal character in BREAK)
+    if(P.resonator){
+      P.resonator.amount = (phase >= 16 && phase < 20) ? 0.3 : 0.05;
+      x = P.resonator.process(x, sr);
     }
     x = P.comp.process(x, 0.126, 4, 5, 50, sr);
     x *= 1.2;
@@ -1645,6 +1766,10 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(!P.subHarmonic) P.subHarmonic = new SubHarmonic();
       if(!P.saturator) P.saturator = new Saturator();
       if(!P.vocoder) P.vocoder = new Vocoder();
+      if(!P.phaser) P.phaser = new Phaser(sr);
+      if(!P.exciter) P.exciter = new HarmonicExciter();
+      if(!P.tapeEcho) P.tapeEcho = new TapeEcho(sr);
+      if(!P.resonator) P.resonator = new Resonator();
       P._inited = true;
     }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
