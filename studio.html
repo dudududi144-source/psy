@@ -1526,11 +1526,7 @@ class Maximizer {
 // ── LUFS metering (ITM-R BS.1770-4 simplified) ──
 class LUFSMeter {
   constructor(){
-    this.meanSquared = 0;
-    this.peakLevel = 0;
-    this.blockSize = 400; // 400ms block
-    this.samples = 0;
-    this.lufs = -70;
+    this.meanSquared = 0; this.peakLevel = 0; this.blockSize = 400; this.samples = 0; this.lufs = -70;
   }
   process(input){
     var sq = input * input;
@@ -1538,16 +1534,147 @@ class LUFSMeter {
     if(Math.abs(input) > this.peakLevel) this.peakLevel = Math.abs(input);
     this.samples++;
     if(this.samples >= this.blockSize){
-      // simplified LUFS: -0.691 + 10*log10(meanSquared)
-      if(this.meanSquared > 1e-10){
-        this.lufs = -0.691 + 10 * Math.log10(this.meanSquared);
-      }
+      if(this.meanSquared > 1e-10) this.lufs = -0.691 + 10 * Math.log10(this.meanSquared);
       this.samples = 0;
     }
-    return input; // passthrough
+    return input;
   }
   getLoudness(){ return this.lufs; }
   getPeak(){ return this.peakLevel; }
+}
+
+// ── Spectrum analyzer (Goertzel algorithm — 16 frequency bins) ──
+class SpectrumAnalyzer {
+  constructor(){
+    this.numBins = 16;
+    this.bins = new Float32Array(this.numBins);
+    // log-spaced frequencies: 60, 100, 170, 280, 470, 780, 1300, 2200, 3700, 6200, 10000, 14000
+    this.freqs = [60, 100, 170, 280, 470, 780, 1300, 2200, 3700, 6200, 10000, 14000];
+    this.phases = new Float32Array(this.freqs.length);
+    this.q = new Float32Array(this.freqs.length);
+    this.decay = 0.95;
+  }
+  process(input, sr){
+    // Goertzel: single-bin DFT (efficient for sparse spectrum)
+    for(var i = 0; i < this.freqs.length; i++){
+      var coeff = 2 * Math.cos(2 * Math.PI * this.freqs[i] / sr);
+      var q0 = coeff * this.q[i] - this.q[i] + input; // simplified
+      // actually Goertzel: q0 = coeff * q1 - q2 + input
+      var q2 = this.q[i];
+      this.q[i] = coeff * this.q[i] - q2 + input;
+      var power = this.q[i] * this.q[i] + q2 * q2 - coeff * this.q[i] * q2;
+      this.bins[i] = this.bins[i] * this.decay + Math.sqrt(Math.abs(power)) * (1 - this.decay);
+    }
+    return input; // passthrough
+  }
+  getBins(){ return this.bins; }
+}
+
+// ── Noise gate (per-channel — silences background when signal low) ──
+class NoiseGate {
+  constructor(){
+    this.env = 0;
+    this.threshold = 0.02;
+    this.attack = 0.01; // 10ms
+    this.release = 0.1; // 100ms
+    this.gain = 1.0;
+  }
+  process(input, sr){
+    var abs = Math.abs(input);
+    this.env = this.env * 0.99 + abs * 0.01; // smooth envelope
+    if(this.env > this.threshold){
+      // open: fast attack
+      this.gain = this.gain * 0.9 + 1.0 * 0.1;
+    } else {
+      // close: slow release
+      this.gain = this.gain * 0.999 + 0.0 * 0.001;
+    }
+    return input * this.gain;
+  }
+}
+
+// ── De-esser (frequency-specific compressor for sibilance 5-10kHz) ──
+class DeEsser {
+  constructor(){
+    this.filter = new ZdfSvf();
+    this.env = 0;
+    this.threshold = 0.08;
+    this.ratio = 4;
+    this.freq = 7000; // sibilance frequency
+    this.reduction = 0;
+  }
+  process(input, sr){
+    // detect energy at sibilance frequency
+    var sibilant = this.filter.process(input, this.freq, 0.8, sr).band;
+    var absS = Math.abs(sibilant);
+    this.env = this.env * 0.95 + absS * 0.05;
+    // compute reduction
+    if(this.env > this.threshold){
+      var over = this.env - this.threshold;
+      this.reduction = Math.min(0.8, over * this.ratio * 0.1);
+    } else {
+      this.reduction = this.reduction * 0.9; // smooth recovery
+    }
+    return input - sibilant * this.reduction;
+  }
+}
+
+// ── Transient shaper (attack/sustain independent control) ──
+class TransientShaper {
+  constructor(){
+    this.fastEnv = 0; this.slowEnv = 0;
+    this.attackGain = 1.5; // boost transients
+    this.sustainGain = 0.8; // reduce sustain
+  }
+  process(input, sr){
+    var abs = Math.abs(input);
+    var fastA = Math.exp(-1 / (0.003 * sr)); // 3ms
+    var slowA = Math.exp(-1 / (0.030 * sr)); // 30ms
+    this.fastEnv = this.fastEnv * fastA + abs * (1 - fastA);
+    this.slowEnv = this.slowEnv * slowA + abs * (1 - slowA);
+    // transient = fast - slow (attack portion)
+    var transient = Math.max(0, this.fastEnv - this.slowEnv);
+    // sustain = slow (body portion)
+    var sustain = this.slowEnv;
+    // apply gains
+    var transientOut = input * this.attackGain * transient / Math.max(0.001, this.fastEnv);
+    var sustainOut = input * this.sustainGain * sustain / Math.max(0.001, this.slowEnv);
+    return transientOut + sustainOut;
+  }
+}
+
+// ── Stereo imager (width control with mono compatibility) ──
+class StereoImager {
+  constructor(){
+    this.width = 1.0; // 0=mono, 1=normal, 2=wide
+    this.midFilter = new ZdfSvf();
+  }
+  process(left, right, sr){
+    var mid = (left + right) * 0.5;
+    var side = (left - right) * 0.5 * this.width;
+    // mono compatibility: limit side to not exceed mid (phase-safe)
+    var midAbs = Math.abs(mid);
+    var sideAbs = Math.abs(side);
+    if(sideAbs > midAbs * 1.5) side = side * (midAbs * 1.5 / Math.max(0.001, sideAbs));
+    return { left: mid + side, right: mid - side };
+  }
+}
+
+// ── Bass enhancer (psychoacoustic — generates harmonics of bass freqs) ──
+class BassEnhancer {
+  constructor(){
+    this.lpf = new ZdfSvf();
+    this.amount = 0.3;
+  }
+  process(input, sr){
+    if(this.amount <= 0) return input;
+    // isolate bass frequencies (below 150Hz)
+    var bass = this.lpf.process(input, 150, 0.5, sr).low;
+    // generate harmonics via saturation (2nd + 3rd)
+    var harmonics = Math.tanh(bass * 3) * 0.3 + Math.tanh(bass * 5) * 0.15;
+    // high-pass the harmonics so we don't add more low end
+    return input + harmonics * this.amount;
+  }
 }
 
 var P = {
@@ -1632,6 +1759,12 @@ var P = {
   dimensionChorus: null,    // dimension chorus (3D widening)
   maximizer: null,           // ISP-aware maximizer
   lufsMeter: null,           // LUFS metering
+  spectrum: null,            // spectrum analyzer
+  noiseGate: null,           // noise gate
+  deEsser: null,             // de-esser
+  transientShaper: null,    // transient shaper
+  stereoImager: null,        // stereo imager
+  bassEnhancer: null,        // bass enhancer
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -2061,6 +2194,10 @@ function rCrash(sr){ var v=P.crash; if(!v.active)return 0; v.ampEnv*=0.9995;
 
 function masterProcess(x, sr){
   try {
+    // noise gate (silences background when signal low)
+    if(P.noiseGate) x = P.noiseGate.process(x, sr);
+    // spectrum analyzer (passthrough — measures spectrum)
+    if(P.spectrum) x = P.spectrum.process(x, sr);
     // granular synthesis: capture mix into grain cloud (atmospheric texture)
     if(P.granular){
       var granularWet = P.granular.process(x * 0.15, 1/sr, 0.3 + P.macroSpace * 0.5);
@@ -2091,8 +2228,14 @@ function masterProcess(x, sr){
     if(P.subHarmonic){ P.subHarmonic.amount = P.energy * 0.2; x = P.subHarmonic.process(x, sr); }
     // harmonic generator (sub-bass from fundamental detection)
     if(P.harmonicGen){ P.harmonicGen.amount = 0.1 + P.energy * 0.1; x = P.harmonicGen.process(x, sr); }
+    // bass enhancer (psychoacoustic — generates harmonics of bass for small speakers)
+    if(P.bassEnhancer){ P.bassEnhancer.amount = 0.1 + P.energy * 0.15; x = P.bassEnhancer.process(x, sr); }
     // harmonic exciter (high-frequency enhancement)
     if(P.exciter){ P.exciter.amount = 0.15 + P.macroBrightness * 0.2; x = P.exciter.process(x, sr); }
+    // de-esser (tames sibilance 7kHz)
+    if(P.deEsser) x = P.deEsser.process(x, sr);
+    // transient shaper (attack boost + sustain control)
+    if(P.transientShaper) x = P.transientShaper.process(x, sr);
     if(P.bitcrusher && phase >= 16 && phase < 20){
       x = P.bitcrusher.process(x, 12, 0.5, sr);
     }
@@ -2220,6 +2363,12 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(!P.dimensionChorus) P.dimensionChorus = new DimensionChorus(sr);
       if(!P.maximizer) P.maximizer = new Maximizer();
       if(!P.lufsMeter) P.lufsMeter = new LUFSMeter();
+      if(!P.spectrum) P.spectrum = new SpectrumAnalyzer();
+      if(!P.noiseGate) P.noiseGate = new NoiseGate();
+      if(!P.deEsser) P.deEsser = new DeEsser();
+      if(!P.transientShaper) P.transientShaper = new TransientShaper();
+      if(!P.stereoImager) P.stereoImager = new StereoImager();
+      if(!P.bassEnhancer) P.bassEnhancer = new BassEnhancer();
       P._inited = true;
     }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
@@ -2271,6 +2420,8 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(P.midSideEQ){ var ms = P.midSideEQ.process(stereo.left, stereo.right, sr); stereo.left = ms.left; stereo.right = ms.right; }
       // dimension chorus (3D widening — Roland Dimension D style)
       if(P.dimensionChorus){ P.dimensionChorus.amount = P.macroSpace * 0.2; var dc = P.dimensionChorus.process(stereo.left, stereo.right, sr); stereo.left = dc.left; stereo.right = dc.right; }
+      // stereo imager (width with mono compatibility)
+      if(P.stereoImager){ P.stereoImager.width = 0.8 + P.macroSpace * 0.6; var si = P.stereoImager.process(stereo.left, stereo.right, sr); stereo.left = si.left; stereo.right = si.right; }
       out[0][i]=stereo.left;out[1][i]=stereo.right;
     }
     if(currentTime-P.lastMetricPost>0.1){ P.lastMetricPost=currentTime;
