@@ -1385,11 +1385,169 @@ class AutoPan {
   process(left, right, sr){
     this.lfo += this.rate / sr * 2 * Math.PI;
     this.lfo -= Math.floor(this.lfo);
-    var pan = Math.sin(this.lfo) * this.depth; // -depth..+depth
+    var pan = Math.sin(this.lfo) * this.depth;
     var lg = 1 - Math.max(0, pan);
     var rg = 1 + Math.min(0, pan);
     return { left: left * lg, right: right * rg };
   }
+}
+
+// ── Multi-band distortion (per-band saturation) ──
+class MultiBandDistortion {
+  constructor(){
+    this.lowF = new ZdfSvf(); this.midF = new ZdfSvf(); this.highF = new ZdfSvf();
+    this.lowDrive = 0.3; this.midDrive = 0.5; this.highDrive = 0.7;
+    this.amount = 0.2;
+  }
+  process(input, sr){
+    if(this.amount <= 0) return input;
+    // 3-band split
+    var low = this.lowF.process(input, 250, 0.5, sr).low;
+    var mid = this.midF.process(input, 1500, 0.5, sr).band;
+    var high = this.highF.process(input, 4000, 0.5, sr).high;
+    // distort each band independently
+    low = Math.tanh(low * (1 + this.lowDrive * 3)) * 0.9;
+    mid = Math.tanh(mid * (1 + this.midDrive * 3)) * 0.8;
+    high = Math.tanh(high * (1 + this.highDrive * 3)) * 0.7;
+    var distorted = low + mid + high;
+    return input * (1 - this.amount) + distorted * this.amount;
+  }
+}
+
+// ── Harmonic generator (sub-bass from fundamental) ──
+class HarmonicGenerator {
+  constructor(){
+    this.lastZero = 0; this.period = 0; this.zeroCount = 0;
+    this.subPhase = 0; this.subFreq = 0;
+    this.amount = 0.2;
+  }
+  process(input, sr){
+    if(this.amount <= 0) return input;
+    // detect fundamental via zero-crossings
+    var sign = input >= 0 ? 1 : -1;
+    if(sign !== this.lastZero){
+      // zero crossing → measure period
+      var measuredPeriod = this.zeroCount;
+      if(measuredPeriod > 10 && measuredPeriod < 2000){
+        this.subFreq = sr / (measuredPeriod * 2);
+        if(this.subFreq > 30 && this.subFreq < 500){
+          // generate sub-octave
+          this.subPhase += this.subFreq / sr * 2 * Math.PI;
+          this.subPhase -= Math.floor(this.subPhase);
+        }
+      }
+      this.zeroCount = 0;
+      this.lastZero = sign;
+    }
+    this.zeroCount++;
+    var sub = Math.sin(this.subPhase) * this.amount;
+    return input + sub * Math.abs(input); // gate sub by input amplitude
+  }
+}
+
+// ── Dimension chorus (3D widening — Roland Dimension D style) ──
+class DimensionChorus {
+  constructor(sr){
+    // 2 voices with slightly different delays + phase inversion
+    this.buf1 = new Float32Array(Math.floor(sr * 0.04));
+    this.buf2 = new Float32Array(Math.floor(sr * 0.05));
+    this.idx1 = 0; this.idx2 = 0;
+    this.lfo1 = 0; this.lfo2 = Math.PI; // 180° offset
+    this.rate = 0.5;
+    this.amount = 0.3;
+  }
+  process(left, right, sr){
+    if(this.amount <= 0) return { left: left, right: right };
+    this.lfo1 += this.rate / sr * 2 * Math.PI;
+    this.lfo2 += this.rate / sr * 2 * Math.PI;
+    this.lfo1 -= Math.floor(this.lfo1); this.lfo2 -= Math.floor(this.lfo2);
+    // mono input for chorus
+    var mono = (left + right) * 0.5;
+    // voice 1: delayed + LFO
+    var d1 = (0.015 + 0.005 * Math.sin(this.lfo1)) * sr;
+    var r1 = (this.idx1 - d1 + this.buf1.length) % this.buf1.length;
+    var i0 = Math.floor(r1), i1 = (i0 + 1) % this.buf1.length;
+    var f = r1 - i0;
+    var v1 = this.buf1[i0] * (1 - f) + this.buf1[i1] * f;
+    this.buf1[this.idx1] = mono;
+    this.idx1 = (this.idx1 + 1) % this.buf1.length;
+    // voice 2: different delay + inverted phase
+    var d2 = (0.02 + 0.005 * Math.sin(this.lfo2)) * sr;
+    var r2 = (this.idx2 - d2 + this.buf2.length) % this.buf2.length;
+    var j0 = Math.floor(r2), j1 = (j0 + 1) % this.buf2.length;
+    var f2 = r2 - j0;
+    var v2 = this.buf2[j0] * (1 - f2) + this.buf2[j1] * f2;
+    this.buf2[this.idx2] = mono;
+    this.idx2 = (this.idx2 + 1) % this.buf2.length;
+    // Dimension D trick: L gets +v1 -v2, R gets -v1 +v2 (wide stereo)
+    var wet = this.amount;
+    return {
+      left: left + (v1 - v2) * wet * 0.5,
+      right: right + (-v1 + v2) * wet * 0.5
+    };
+  }
+}
+
+// ── Maximizer (ISP-aware limiter with lookahead) ──
+class Maximizer {
+  constructor(){
+    this.ceiling = 0.95;
+    this.lookahead = 32; // samples
+    this.buf = new Float32Array(this.lookahead);
+    this.idx = 0;
+    this.gain = 1.0;
+    this.releaseRate = 0.001; // gain recovery per sample
+  }
+  process(input, sr){
+    // store in lookahead buffer
+    var delayed = this.buf[this.idx];
+    this.buf[this.idx] = input;
+    this.idx = (this.idx + 1) % this.lookahead;
+    // find peak in lookahead window
+    var peak = 0;
+    for(var i = 0; i < this.lookahead; i++){
+      if(Math.abs(this.buf[i]) > peak) peak = Math.abs(this.buf[i]);
+    }
+    // compute target gain
+    var targetGain = 1.0;
+    if(peak * this.gain > this.ceiling){
+      targetGain = this.ceiling / Math.max(0.001, peak);
+    }
+    // smooth gain reduction (instant attack, slow release)
+    if(targetGain < this.gain){
+      this.gain = targetGain; // instant attack
+    } else {
+      this.gain = Math.min(1.0, this.gain + this.releaseRate); // slow release
+    }
+    return delayed * this.gain;
+  }
+}
+
+// ── LUFS metering (ITM-R BS.1770-4 simplified) ──
+class LUFSMeter {
+  constructor(){
+    this.meanSquared = 0;
+    this.peakLevel = 0;
+    this.blockSize = 400; // 400ms block
+    this.samples = 0;
+    this.lufs = -70;
+  }
+  process(input){
+    var sq = input * input;
+    this.meanSquared = this.meanSquared * 0.999 + sq * 0.001;
+    if(Math.abs(input) > this.peakLevel) this.peakLevel = Math.abs(input);
+    this.samples++;
+    if(this.samples >= this.blockSize){
+      // simplified LUFS: -0.691 + 10*log10(meanSquared)
+      if(this.meanSquared > 1e-10){
+        this.lufs = -0.691 + 10 * Math.log10(this.meanSquared);
+      }
+      this.samples = 0;
+    }
+    return input; // passthrough
+  }
+  getLoudness(){ return this.lufs; }
+  getPeak(){ return this.peakLevel; }
 }
 
 var P = {
@@ -1469,6 +1627,11 @@ var P = {
   reverseReverb: null,      // reverse reverb
   pingPong: null,           // stereo delay (ping-pong)
   autoPan: null,            // auto-pan
+  mbDistortion: null,       // multi-band distortion
+  harmonicGen: null,        // harmonic generator (sub-bass)
+  dimensionChorus: null,    // dimension chorus (3D widening)
+  maximizer: null,           // ISP-aware maximizer
+  lufsMeter: null,           // LUFS metering
   bassGrammar: null, melodicGrammar: null,
   kick:{active:false,phase:0,freq:120,pitchEnv:1,ampEnv:0,clickEnv:0,gain:1,vel:1},
   sub:{active:false,phase:0,freq:27.5,ampEnv:0,gain:0.5,vel:1},
@@ -1922,8 +2085,12 @@ function masterProcess(x, sr){
     x = Math.tanh(x * (1 + drive * 3)) / Math.tanh(1 + drive * 3);
     // saturator (tape mode — warm harmonic saturation)
     if(P.saturator){ P.saturator.drive = 0.2 + P.macroTension * 0.3; x = P.saturator.process(x); }
+    // multi-band distortion (per-band saturation for richer harmonics)
+    if(P.mbDistortion){ P.mbDistortion.amount = 0.05 + P.energy * 0.1; x = P.mbDistortion.process(x, sr); }
     // sub-harmonic synth (adds sub-octave from signal)
     if(P.subHarmonic){ P.subHarmonic.amount = P.energy * 0.2; x = P.subHarmonic.process(x, sr); }
+    // harmonic generator (sub-bass from fundamental detection)
+    if(P.harmonicGen){ P.harmonicGen.amount = 0.1 + P.energy * 0.1; x = P.harmonicGen.process(x, sr); }
     // harmonic exciter (high-frequency enhancement)
     if(P.exciter){ P.exciter.amount = 0.15 + P.macroBrightness * 0.2; x = P.exciter.process(x, sr); }
     if(P.bitcrusher && phase >= 16 && phase < 20){
@@ -1980,6 +2147,10 @@ function masterProcess(x, sr){
     if(x > 0.95) x = 0.95; if(x < -0.95) x = -0.95;
     // soft limiter (tanh) for final protection
     x = Math.tanh(x * 1.2) * 0.85;
+    // maximizer (ISP-aware lookahead limiter — final loudness)
+    if(P.maximizer){ P.maximizer.ceiling = 0.9; x = P.maximizer.process(x, sr); }
+    // LUFS metering (passthrough — measures loudness)
+    if(P.lufsMeter) x = P.lufsMeter.process(x);
   } catch(e) { /* swallow to keep worklet alive */ }
   return x;
 }
@@ -2044,6 +2215,11 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       if(!P.reverseReverb) P.reverseReverb = new ReverseReverb(sr);
       if(!P.pingPong) P.pingPong = new PingPongDelay(sr);
       if(!P.autoPan) P.autoPan = new AutoPan();
+      if(!P.mbDistortion) P.mbDistortion = new MultiBandDistortion();
+      if(!P.harmonicGen) P.harmonicGen = new HarmonicGenerator();
+      if(!P.dimensionChorus) P.dimensionChorus = new DimensionChorus(sr);
+      if(!P.maximizer) P.maximizer = new Maximizer();
+      if(!P.lufsMeter) P.lufsMeter = new LUFSMeter();
       P._inited = true;
     }
     var bpm = P.tempoCurrent || P.bpm; // tempo automation
@@ -2093,10 +2269,12 @@ class PsyStudioProcessor extends AudioWorkletProcessor {
       }
       // mid/side EQ (enhances width)
       if(P.midSideEQ){ var ms = P.midSideEQ.process(stereo.left, stereo.right, sr); stereo.left = ms.left; stereo.right = ms.right; }
+      // dimension chorus (3D widening — Roland Dimension D style)
+      if(P.dimensionChorus){ P.dimensionChorus.amount = P.macroSpace * 0.2; var dc = P.dimensionChorus.process(stereo.left, stereo.right, sr); stereo.left = dc.left; stereo.right = dc.right; }
       out[0][i]=stereo.left;out[1][i]=stereo.right;
     }
     if(currentTime-P.lastMetricPost>0.1){ P.lastMetricPost=currentTime;
-      this.port.postMessage({type:"metrics",barIndex:P.barIndex,section:P.section,bpm:P.bpm,energy:P.energy,tension:P.tension,chordRoot:getChordRoot(P.barIndex),directorAction:P.currentPlan?P.currentPlan.decision.action:"abstain",directorReason:P.currentPlan?P.currentPlan.decision.reason:"init",mixer:P.mixer,macros:{tension:P.macroTension,brightness:P.macroBrightness,space:P.macroSpace}}); }
+      this.port.postMessage({type:"metrics",barIndex:P.barIndex,section:P.section,bpm:P.bpm,energy:P.energy,tension:P.tension,chordRoot:getChordRoot(P.barIndex),directorAction:P.currentPlan?P.currentPlan.decision.action:"abstain",directorReason:P.currentPlan?P.currentPlan.decision.reason:"init",mixer:P.mixer,macros:{tension:P.macroTension,brightness:P.macroBrightness,space:P.macroSpace},lufs:P.lufsMeter?P.lufsMeter.getLoudness():-70,peak:P.lufsMeter?P.lufsMeter.getPeak():0}); }
     } catch(e) { /* swallow errors to keep worklet alive */ }
     return true;
   }
